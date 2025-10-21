@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Registrar — Site Simples</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 2rem;
+      }
+      .container {
+        max-width: 700px;
+        margin: 0 auto;
+      }
+      input {
+        width: 100%;
+        padding: 8px;
+        margin: 6px 0;
+        box-sizing: border-box;
+      }
+      button {
+        padding: 8px 12px;
+        margin-top: 8px;
+      }
+      .nav {
+        margin-bottom: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="nav">
+        <a href="/login/">Login</a> |
+        <a href="/register/">Registrar</a>
+      </div>
+
+      {% if messages %} {% for m in messages %}
+      <div style="color: red">{{ m }}</div>
+      {% endfor %} {% endif %}
+
+      <h2>Registrar</h2>
+      <form method="post" action="/register/">
+        {% csrf_token %}
+        <label>Nome de usuário</label>
+        <input name="username" required autofocus />
+        <label>Email</label>
+        <input name="email" type="email" required />
+        <label>Senha</label>
+        <input name="password" type="password" required />
+        <div style="margin-top: 8px">
+          <button type="submit">Cadastrar</button>
+        </div>
+      </form>
+
+      <p style="margin-top: 12px">Já tem conta? <a href="/login/">Entrar</a></p>
+    </div>
+  </body>
+</html>
