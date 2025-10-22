@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Home — Site Simples</title>
+    <title>Loja</title>
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -16,29 +16,30 @@
       .nav {
         margin-bottom: 12px;
       }
-      code {
-        background: #f2f2f2;
-        padding: 2px 6px;
-        border-radius: 3px;
+      .item {
+        padding: 8px;
+        border-bottom: 1px solid #eee;
       }
     </style>
   </head>
   <body>
     <div class="container">
-      <!-- Header: Na Home mostramos "My Team | Loja | Jogos | Suporte" -->
       <div class="nav">
-        <a href="/my-team/">My Team</a> | <a href="/store/">Loja</a> |
+        <a href="/">Home</a> | <a href="/store/">Loja</a> |
         <a href="/jogos/">Jogos</a> |
         <a href="/support/">Suporte</a>
         <span style="float: right"><a href="/logout/">Sair</a></span>
       </div>
 
-      <h2>Home</h2>
+      <h2>Loja</h2>
 
-      <!-- Aqui usamos variáveis Django normais -->
-      <p>Bem-vindo, <strong>{{ user.username }}</strong>!</p>
-      <p>Email: {{ user.email }}</p>
-      <p>ID único: <code>{{ user.id }}</code></p>
+      {% if items %} {% for it in items %}
+      <div class="item">
+        <strong>{{ it.name }}</strong> — {{ it.price }} moedas
+      </div>
+      {% endfor %} {% else %}
+      <p>Loja vazia no momento.</p>
+      {% endif %}
     </div>
   </body>
 </html>

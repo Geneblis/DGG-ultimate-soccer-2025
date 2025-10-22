@@ -1,0 +1,46 @@
+/* static/css/style.css */
+body {
+  font-family: Arial, sans-serif;
+  margin: 2rem;
+  background: #fafafa;
+  color: #222;
+}
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+}
+.nav {
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.nav a {
+  text-decoration: none;
+  color: #1a73e8;
+  margin-right: 8px;
+}
+.float-right {
+  float: right;
+}
+.clearfix::after {
+  content: "";
+  display: block;
+  clear: both;
+}
+.card {
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #fff;
+}
+.item,
+.match {
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+  background: #fff;
+  margin-bottom: 6px;
+}
+code {
+  background: #f2f2f2;
+  padding: 2px 6px;
+  border-radius: 3px;
+}

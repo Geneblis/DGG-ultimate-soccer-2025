@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Home — Site Simples</title>
+    <title>My Team</title>
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -16,29 +16,31 @@
       .nav {
         margin-bottom: 12px;
       }
-      code {
-        background: #f2f2f2;
-        padding: 2px 6px;
-        border-radius: 3px;
+      .card {
+        padding: 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
       }
     </style>
   </head>
   <body>
     <div class="container">
-      <!-- Header: Na Home mostramos "My Team | Loja | Jogos | Suporte" -->
+      <!-- Header: aqui mostramos "Home | Loja | Jogos | Suporte" -->
       <div class="nav">
-        <a href="/my-team/">My Team</a> | <a href="/store/">Loja</a> |
+        <a href="/">Home</a> | <a href="/store/">Loja</a> |
         <a href="/jogos/">Jogos</a> |
         <a href="/support/">Suporte</a>
         <span style="float: right"><a href="/logout/">Sair</a></span>
       </div>
 
-      <h2>Home</h2>
+      <h2>My Team</h2>
+      <div class="card">
+        <p><strong>Time:</strong> {{ team.name }}</p>
+        <p><strong>Nível:</strong> {{ team.level }}</p>
+        <p><strong>Moedas:</strong> {{ team.coins }}</p>
+      </div>
 
-      <!-- Aqui usamos variáveis Django normais -->
-      <p>Bem-vindo, <strong>{{ user.username }}</strong>!</p>
-      <p>Email: {{ user.email }}</p>
-      <p>ID único: <code>{{ user.id }}</code></p>
+      <p style="margin-top: 12px"><a href="/">Voltar para Home</a></p>
     </div>
   </body>
 </html>
