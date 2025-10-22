@@ -1,0 +1,29 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Contracts</title>
+    <link rel="stylesheet" href="{% static 'css/style.css' %}" />
+  </head>
+  <body>
+    <div class="container clearfix">
+      <div class="nav">
+        <a href="{% url 'my_team' %}">My Team</a> |
+        <a href="{% url 'store' %}">Store</a> |
+        <a href="{% url 'matches' %}">Matches</a> |
+        <a href="{% url 'support' %}">Support</a>
+        <span class="float-right"><a href="{% url 'logout' %}">Logout</a></span>
+      </div>
+
+      <h2>Contracts</h2>
+      {% if contratos %} {% for c in contratos %}
+      <div class="item">
+        #{{ c.id }} — {{ c.player }} — Value: {{ c.value }}
+      </div>
+      {% endfor %} {% else %}
+      <p>No contracts.</p>
+      {% endif %}
+    </div>
+  </body>
+</html>

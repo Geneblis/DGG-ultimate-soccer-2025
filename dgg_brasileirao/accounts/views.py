@@ -133,7 +133,7 @@ def jogos_view(request):
         {"opponent": "Time A", "date": "2025-10-25"},
         {"opponent": "Time B", "date": "2025-10-30"},
     ]
-    return render(request, "accounts/jogos.html", {"user": user, "matches": matches})
+    return render(request, "accounts/matches.html", {"user": user, "matches": matches})
 
 def support_view(request):
     """
@@ -143,3 +143,25 @@ def support_view(request):
     if not user:
         return redirect("login")
     return render(request, "accounts/support.html", {"user": user})
+
+def contratos_view(request):
+    """Rota /contracts/ — exibe lista de contratos (placeholder)."""
+    user = _get_current_user(request)
+    if not user:
+        return redirect("login")
+    contratos = [
+        {"id": 1, "player": "Player X", "value": 1000},
+        {"id": 2, "player": "Player Y", "value": 750},
+    ]
+    return render(request, "accounts/contracts.html", {"user": user, "contratos": contratos})
+
+def missoes_view(request):
+    """Rota /missions/ — exibe missões (placeholder)."""
+    user = _get_current_user(request)
+    if not user:
+        return redirect("login")
+    missoes = [
+        {"id": 1, "title": "Train 3x", "reward": 50},
+        {"id": 2, "title": "Win a match", "reward": 100},
+    ]
+    return render(request, "accounts/missions.html", {"user": user, "missoes": missoes})

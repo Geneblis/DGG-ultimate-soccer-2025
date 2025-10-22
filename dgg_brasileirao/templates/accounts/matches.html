@@ -1,0 +1,31 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <title>Jogos</title>
+    <link rel="stylesheet" href="{% static 'css/style.css' %}" />
+  </head>
+  <body>
+    <div class="container clearfix">
+      <div class="nav">
+        <a href="{% url 'my_team' %}">Meu Time</a> |
+        <a href="{% url 'store' %}">Loja</a> |
+        <a href="{% url 'matches' %}">Jogos</a> |
+        <a href="{% url 'support' %}">Suporte</a>
+        <span class="float-right"><a href="{% url 'logout' %}">Sair</a></span>
+      </div>
+
+      <h2>Jogos</h2>
+
+      {% if matches %} {% for m in matches %}
+      <div class="match">
+        <strong>Adversário:</strong> {{ m.opponent }} —
+        <em>Data: {{ m.date }}</em>
+      </div>
+      {% endfor %} {% else %}
+      <p>Nenhum jogo agendado.</p>
+      {% endif %}
+    </div>
+  </body>
+</html>

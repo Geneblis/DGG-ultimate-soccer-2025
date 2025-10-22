@@ -8,9 +8,13 @@ urlpatterns = [
     path("register/", views.register_view, name="register"),
     path("logout/", views.logout_view, name="logout"),
 
-    # novas páginas
+    # English paths / names
     path("my-team/", views.my_team_view, name="my_team"),
     path("store/", views.store_view, name="store"),
-    path("jogos/", views.jogos_view, name="jogos"),
+    path("matches/", views.jogos_view, name="matches"),    # maps to jogos_view
     path("support/", views.support_view, name="support"),
+
+    # extras
+    path("contracts/", views.contratos_view, name="contracts"),
+    path("missions/", views.missoes_view, name="missions"),
 ]
