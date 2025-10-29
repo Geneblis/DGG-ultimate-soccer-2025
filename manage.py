@@ -5,8 +5,11 @@ import sys
 
 
 def main():
-    """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dgg_brasileirao.settings')
+    print("AVISO! AVISO! AVISO!\n")
+    print("\ncaso o programa esteja dando erro no banco de dados, rode:\n")
+    print("python manage.py makemigrations sistemas")
+    print("python manage.py migrate\n\n")
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'dgg_brasileirao.settings') 
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
