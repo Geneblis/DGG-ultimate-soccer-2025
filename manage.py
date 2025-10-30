@@ -5,7 +5,7 @@ import sys
 
 
 def main():
-    print("AVISO! AVISO! AVISO!\n")
+    print("AVISO! AVISO! AVISO!")
     print("\ncaso o programa esteja dando erro no banco de dados, rode:\n")
     print("python manage.py makemigrations sistemas")
     print("python manage.py migrate\n\n")
