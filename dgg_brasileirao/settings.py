@@ -47,10 +47,13 @@ TEMPLATES = [
 WSGI_APPLICATION = "dgg_brasileirao.wsgi.application"
 
 # DB pode ficar com sqlite padrão (não usaremos para usuários)
+BANCOS_DIR = BASE_DIR / "bancos"
+os.makedirs(BANCOS_DIR, exist_ok=True)
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": BANCOS_DIR / "db.sqlite3",
     }
 }
 

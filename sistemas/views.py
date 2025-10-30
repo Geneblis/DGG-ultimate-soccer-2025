@@ -3,16 +3,15 @@ import datetime
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.contrib.auth.hashers import make_password, check_password
-
-from .models import SimpleUser
+from .models import SistemasUser, JogadorCampo, InventoryItem
 
 def _get_current_user(request):
     uid = request.session.get("user_id")
     if not uid:
         return None
     try:
-        return SimpleUser.objects.get(pk=uid)
-    except SimpleUser.DoesNotExist:
+        return SistemasUser.objects.get(pk=uid)
+    except SistemasUser.DoesNotExist:
         return None
 
 def register_view(request):
@@ -25,30 +24,31 @@ def register_view(request):
         if not username or not email or not password:
             messages.error(request, "Preencha todos os campos.")
         else:
-            if SimpleUser.objects.filter(email=email).exists():
+            if SistemasUser.objects.filter(email=email).exists():
                 messages.error(request, "Email já cadastrado.")
-            elif SimpleUser.objects.filter(username__iexact=username).exists():
+            elif SistemasUser.objects.filter(username__iexact=username).exists():
                 messages.error(request, "Nome de usuário já existe.")
             else:
                 hashed = make_password(password)
-                new_user = SimpleUser.objects.create(
+                new_user = SistemasUser.objects.create(
                     full_name=full_name,
                     username=username,
                     email=email,
                     password=hashed,
-                    coins=100,  # moedas iniciais (opcional)
+                    coins=100,
                 )
                 request.session["user_id"] = str(new_user.id)
                 return redirect("home")
     return render(request, "accounts/register.html")
+
 
 def login_view(request):
     if request.method == "POST":
         email = (request.POST.get("email") or "").strip().lower()
         password = request.POST.get("password") or ""
         try:
-            user = SimpleUser.objects.get(email=email)
-        except SimpleUser.DoesNotExist:
+            user = SistemasUser.objects.get(email=email)
+        except SistemasUser.DoesNotExist:
             user = None
 
         if user and check_password(password, user.password):
