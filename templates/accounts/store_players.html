@@ -35,11 +35,7 @@
             />
             <div class="badge overall-badge">{{ p.overall }}</div>
 
-            <div class="position-abbr">
-              {% if p.position == "OffensiveZone" %}OFF {% elif p.position ==
-              "NeutralZone" %}MID {% elif p.position == "DefensiveZone" %}DEF {%
-              else %}GK{% endif %}
-            </div>
+            <div class="position-abbr">{{ p.get_position_abbr }}</div>
 
             {% if p.flag_url %}
             <img class="flag" src="{{ p.flag_url }}" alt="{{ p.country }}" />

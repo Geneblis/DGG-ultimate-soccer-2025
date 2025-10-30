@@ -86,6 +86,16 @@ class JogadorCampo(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.club})"
+    
+    def get_position_abbr(self):
+        if self.position == "OffensiveZone":
+            return "ATA"
+        elif self.position == "NeutralZone":
+            return "MID"
+        elif self.position == "DefensiveZone":
+            return "DEF"
+        return "N/A"
+
 
 # Inventário / Ownership: quantas cópias do jogador o user possui
 class InventoryItem(models.Model):
