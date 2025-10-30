@@ -34,11 +34,34 @@
               alt="{{ p.name }}"
             />
             <div class="badge overall-badge">{{ p.overall }}</div>
+
+            <!-- posição abreviada (ex: OffensiveZone -> OFF) -->
+            <div class="position-abbr">
+              {% if p.position == "OffensiveZone" %}OFF{% elif p.position ==
+              "NeutralZone" %}MID{% elif p.position == "DefensiveZone" %}DEF{%
+              else %}GK{% endif %}
+            </div>
+
+            <!-- bandeira e escudo (arquivos esperados em static/flags/ e static/club_badges/) -->
+            <img
+              class="flag"
+              src="{% static 'flags/'|add:p.country|add:'.png' %}"
+              alt="{{ p.country }}"
+              onerror="this.style.display='none'"
+            />
+            <img
+              class="club-badge"
+              src="{% static 'club_badges/'|add:p.club|add:'.png' %}"
+              alt="{{ p.club }}"
+              onerror="this.style.display='none'"
+            />
+
             <div class="photo-meta">
               <div class="meta-line">{{ p.position }}</div>
               <div class="meta-line">{{ p.country }}</div>
               <div class="meta-line">{{ p.club }}</div>
             </div>
+
             <div class="stats-bottom">
               <div class="stat-col">
                 <div class="stat">
@@ -64,6 +87,7 @@
           </div>
           <div class="player-name">{{ p.name }}</div>
         </div>
+
         {% empty %}
         <p>Nenhum jogador de campo cadastrado.</p>
         {% endfor %}
