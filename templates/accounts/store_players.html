@@ -1,6 +1,6 @@
-{% load static %}
 <!DOCTYPE html>
 <html lang="pt-br">
+  {% load static %}
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -35,26 +35,31 @@
             />
             <div class="badge overall-badge">{{ p.overall }}</div>
 
-            <!-- posição abreviada (ex: OffensiveZone -> OFF) -->
             <div class="position-abbr">
-              {% if p.position == "OffensiveZone" %}OFF{% elif p.position ==
-              "NeutralZone" %}MID{% elif p.position == "DefensiveZone" %}DEF{%
+              {% if p.position == "OffensiveZone" %}OFF {% elif p.position ==
+              "NeutralZone" %}MID {% elif p.position == "DefensiveZone" %}DEF {%
               else %}GK{% endif %}
             </div>
 
-            <!-- bandeira e escudo (arquivos esperados em static/flags/ e static/club_badges/) -->
+            {% if p.flag_url %}
+            <img class="flag" src="{{ p.flag_url }}" alt="{{ p.country }}" />
+            {% else %} {# opcional: tentar uma flag local chamada por exemplo
+            'flags/default.png' #}
             <img
               class="flag"
-              src="{% static 'flags/'|add:p.country|add:'.png' %}"
-              alt="{{ p.country }}"
+              src="{% static 'flags/default.png' %}"
+              alt=""
               onerror="this.style.display='none'"
             />
+            {% endif %} {# Club logo: espera path relativo tipo
+            'players/santos/logo.png' em p.club_logo #} {% if p.club_logo %}
             <img
               class="club-badge"
-              src="{% static 'club_badges/'|add:p.club|add:'.png' %}"
+              src="{% static p.club_logo %}"
               alt="{{ p.club }}"
               onerror="this.style.display='none'"
             />
+            {% endif %}
 
             <div class="photo-meta">
               <div class="meta-line">{{ p.position }}</div>
@@ -104,11 +109,33 @@
               alt="{{ g.name }}"
             />
             <div class="badge overall-badge">{{ g.overall }}</div>
+
+            <div class="position-abbr">GK</div>
+
+            {% if g.flag_url %}
+            <img class="flag" src="{{ g.flag_url }}" alt="{{ g.country }}" />
+            {% else %}
+            <img
+              class="flag"
+              src="{% static 'flags/default.png' %}"
+              alt=""
+              onerror="this.style.display='none'"
+            />
+            {% endif %} {% if g.club_logo %}
+            <img
+              class="club-badge"
+              src="{% static g.club_logo %}"
+              alt="{{ g.club }}"
+              onerror="this.style.display='none'"
+            />
+            {% endif %}
+
             <div class="photo-meta">
               <div class="meta-line">{{ g.position }}</div>
               <div class="meta-line">{{ g.country }}</div>
               <div class="meta-line">{{ g.club }}</div>
             </div>
+
             <div class="stats-bottom">
               <div class="stat-col">
                 <div class="stat">

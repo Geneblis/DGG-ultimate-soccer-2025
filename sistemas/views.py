@@ -4,6 +4,56 @@ from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.contrib.auth.hashers import make_password, check_password
 from .models import SistemasUser, JogadorCampo, JogadorGoleiro, InventoryItem
+from django.utils.text import slugify
+
+def _static_path_for_club_logo(player):
+    """
+    Retorna um caminho relativo para o logo do clube que existe - exemplo:
+    'players/santos/logo.png' (para usar com {% static %}).
+    Retorna None se não existir.
+    """
+    # normaliza o nome do clube para slug (ex: "Santos FC" -> "santos-fc")
+    slug = slugify(player.club or "")
+    candidate = f"players/{slug}/logo.png"
+    # se suas imagens estão em STATICFILES_DIRS (ex: imagens/players/...), então
+    # {% static candidate %} deve resolver. Aqui só retornamos o path relativo.
+    return candidate
+
+def _flag_url_for_country(country_code_or_name):
+    """
+    Espera que country seja o ISO alpha-2 (ex: 'br'). Se for nome longo, tenta
+    fazer um mapeamento básico; ideal é já salvar ISO no DB.
+    Retorna URL absoluta da CDN (FlagCDN) ou None.
+    """
+    if not country_code_or_name:
+        return None
+    cc = str(country_code_or_name).strip().lower()
+    # se já é 2 letras, usa direto
+    if len(cc) == 2 and cc.isalpha():
+        return f"https://flagcdn.com/h40/{cc}.png"
+    # mapeamento simples (adicione os que precisar)
+    MAP = {
+        "brazil": "br",
+        "argentina": "ar",
+        "uruguay": "uy",
+        "chile": "cl",
+        "portugal": "pt",
+        "spain": "es",
+        "espanha": "es",
+        "colombia": "co",
+        "paraguay": "py",
+        "bolivia": "bo",
+        "peru": "pe",
+        "france": "fr",
+        "england": "gb",
+        "unitedstates": "us",
+        # adicione conforme sua necessidade...
+    }
+    key = cc.lower()
+    code = MAP.get(key)
+    if code:
+        return f"https://flagcdn.com/h40/{code}.png"
+    return None  # se não souber, devolve None
 
 def _get_current_user(request):
     uid = request.session.get("user_id")
@@ -110,22 +160,17 @@ def missoes_view(request):
     return render(request, "accounts/missions.html", {"user": user, "missoes": missoes})
 
 def store_players_view(request):
-    # reusa o _get_current_user que você já tem (ou usa request.session)
-    from .views import _get_current_user as _get_user_helper  # se _get_current_user está no mesmo arquivo ajuste conforme necessário
-    user = _get_user_helper(request)
+    user = _get_current_user(request)
     if not user:
         return redirect("login")
 
-    # buscar jogadores via ORM se os modelos existirem
-    field_players = []
-    goalkeepers = []
-    if JogadorCampo is not None:
-        field_players = list(JogadorCampo.objects.all().order_by("-overall", "name"))
-    if JogadorGoleiro is not None:
-        goalkeepers = list(JogadorGoleiro.objects.all().order_by("-overall", "name"))
+    field_players = list(JogadorCampo.objects.all().order_by("-overall", "name"))
+    goalkeepers = list(JogadorGoleiro.objects.all().order_by("-overall", "name"))
 
-    # Se por acaso você não tiver os modelos (fallback), tenta ler direto do sqlite
-    # (normalmente não necessário). Mantive simples: se não tiver modelos, listas vazias.
+    for p in field_players + goalkeepers:
+        p.flag_url = _flag_url_for_country(p.country)
+        p.club_logo = _static_path_for_club_logo(p)
+
     return render(request, "accounts/store_players.html", {
         "user": user,
         "field_players": field_players,
