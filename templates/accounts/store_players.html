@@ -34,33 +34,19 @@
               alt="{{ p.name }}"
             />
             <div class="badge overall-badge">{{ p.overall }}</div>
-
             <div class="position-abbr">{{ p.get_position_abbr }}</div>
 
-            {% if p.flag_url %}
-            <img class="flag" src="{{ p.flag_url }}" alt="{{ p.country }}" />
-            {% else %} {# opcional: tentar uma flag local chamada por exemplo
-            'flags/default.png' #}
-            <img
-              class="flag"
-              src="{% static 'flags/default.png' %}"
-              alt=""
-              onerror="this.style.display='none'"
-            />
-            {% endif %} {# Club logo: espera path relativo tipo
-            'players/santos/logo.png' em p.club_logo #} {% if p.club_logo %}
-            <img
-              class="club-badge"
-              src="{% static p.club_logo %}"
-              alt="{{ p.club }}"
-              onerror="this.style.display='none'"
-            />
-            {% endif %}
-
             <div class="photo-meta">
-              <div class="meta-line">{{ p.position }}</div>
-              <div class="meta-line">{{ p.country }}</div>
-              <div class="meta-line">{{ p.club }}</div>
+              {% if p.flag_url %}
+              <img class="flag" src="{{ p.flag_url }}" alt="{{ p.country }}" />
+              {% endif %} {% if p.club_logo %}
+              <img
+                class="club-badge"
+                src="{% static p.club_logo %}"
+                alt="{{ p.club }}"
+                onerror="this.style.display='none'"
+              />
+              {% endif %}
             </div>
 
             <div class="stats-bottom">
@@ -105,31 +91,19 @@
               alt="{{ g.name }}"
             />
             <div class="badge overall-badge">{{ g.overall }}</div>
-
             <div class="position-abbr">GK</div>
 
-            {% if g.flag_url %}
-            <img class="flag" src="{{ g.flag_url }}" alt="{{ g.country }}" />
-            {% else %}
-            <img
-              class="flag"
-              src="{% static 'flags/default.png' %}"
-              alt=""
-              onerror="this.style.display='none'"
-            />
-            {% endif %} {% if g.club_logo %}
-            <img
-              class="club-badge"
-              src="{% static g.club_logo %}"
-              alt="{{ g.club }}"
-              onerror="this.style.display='none'"
-            />
-            {% endif %}
-
             <div class="photo-meta">
-              <div class="meta-line">{{ g.position }}</div>
-              <div class="meta-line">{{ g.country }}</div>
-              <div class="meta-line">{{ g.club }}</div>
+              {% if g.flag_url %}
+              <img class="flag" src="{{ g.flag_url }}" alt="{{ g.country }}" />
+              {% endif %} {% if g.club_logo %}
+              <img
+                class="club-badge"
+                src="{% static g.club_logo %}"
+                alt="{{ g.club }}"
+                onerror="this.style.display='none'"
+              />
+              {% endif %}
             </div>
 
             <div class="stats-bottom">
