@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="pt-br">
-{% load static %}
+  {% load static %}
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Loja</title>
 
-    <link rel="stylesheet" href="{% static 'css/style.css' %}">
-    
+    <link rel="stylesheet" href="{% static 'css/style.css' %}" />
+
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -36,6 +36,10 @@
       </div>
 
       <h2>Loja</h2>
+
+      <p>
+        <a class="btn" href="{% url 'store_players' %}">Mostrar Jogadores</a>
+      </p>
 
       {% if items %} {% for it in items %}
       <div class="item">

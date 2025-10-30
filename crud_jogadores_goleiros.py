@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-crud_jogadores_de_campo.py (atualizado)
-- Posições por escolha.
-- Se o usuário fornecer clube "santos", o script listará imagens em imagens/players/santos/.
-  Se não houver, avisa "Nenhuma imagem encontrada nesse time" e permite buscar globalmente ou informar
-  manualmente um caminho relativo dentro de players/.
-- Mantém club, country e photo_path como obrigatórios.
+crud_goleiros.py
+CRUD CLI para goleiros — tabela 'jogadores_goleiros' no bancos/db.sqlite3.
+
+Regras:
+- Imagens devem estar em 'imagens/players/<team>/...'
+- Ao criar: tenta listar imagens do time; se não houver dá opção (buscar global / digitar manual / cancelar)
+- Campos obrigatórios: club, country, photo_path
+- position será fixo como "GoalkeeperZone"
 """
 
 import os
@@ -13,21 +15,16 @@ import sqlite3
 import uuid
 from pathlib import Path
 from statistics import median
+import datetime
 
 ROOT = Path(__file__).resolve().parent
 BANCOS_DIR = ROOT / "bancos"
 DB_PATH = BANCOS_DIR / "db.sqlite3"
 
-# A pasta onde você guarda as imagens para os players
 IMAGES_ROOT = ROOT / "imagens" / "players"
-POSITION_CHOICES = [
-    "OffensiveZone",
-    "NeutralZone",
-    "DefensiveZone",
-]
 
 CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS jogadores_campo (
+CREATE TABLE IF NOT EXISTS jogadores_goleiros (
     id TEXT PRIMARY KEY,
     level INTEGER NOT NULL,
     name TEXT NOT NULL,
@@ -36,10 +33,11 @@ CREATE TABLE IF NOT EXISTS jogadores_campo (
     country TEXT NOT NULL,
     photo_path TEXT NOT NULL,
     overall INTEGER,
-    attack INTEGER,
-    passing INTEGER,
-    defense INTEGER,
-    speed INTEGER
+    handling INTEGER,
+    positioning INTEGER,
+    reflex INTEGER,
+    speed INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -52,7 +50,6 @@ def ensure_db():
     return conn
 
 def scan_images():
-    """Retorna lista de Paths relativos (a IMAGES_ROOT)."""
     imgs = []
     if not IMAGES_ROOT.exists():
         return imgs
@@ -63,7 +60,6 @@ def scan_images():
     return imgs
 
 def scan_images_for_team(team):
-    """Retorna lista de Paths relativos dentro de IMAGES_ROOT/team/..."""
     imgs = []
     team_dir = IMAGES_ROOT / team
     if not team_dir.exists() or not team_dir.is_dir():
@@ -75,20 +71,15 @@ def scan_images_for_team(team):
     return imgs
 
 def choose_from_list(imgs):
-    """
-    Escolhe um item de uma lista de Paths (relativos a IMAGES_ROOT).
-    Retorna string tipo 'players/<relative>' ou None.
-    """
     if not imgs:
         return None
     while True:
-        # mostra até 50 por vez
         to_show = imgs[:50]
         for i, rel in enumerate(to_show, start=1):
             print(f"{i:3d}) {rel}")
         if len(imgs) > 50:
             print("... (e mais {})".format(len(imgs) - 50))
-        s = input("Digite número para escolher, 'a' para listar tudo, 's' para buscar, 'q' para cancelar: ").strip().lower()
+        s = input("Digite número para escolher, 'a' listar tudo, 's' buscar, 'q' cancelar: ").strip().lower()
         if s == "q":
             return None
         if s == "a":
@@ -131,7 +122,6 @@ def choose_from_list(imgs):
         print("Entrada inválida.")
 
 def choose_image_interactive():
-    """Busca globalmente dentro de imagens/players e chama choose_from_list."""
     imgs = scan_images()
     if not imgs:
         print("Nenhuma imagem encontrada em", IMAGES_ROOT)
@@ -139,10 +129,6 @@ def choose_image_interactive():
     return choose_from_list(imgs)
 
 def validate_and_normalize_manual_path(user_input):
-    """
-    Aceita um caminho relativo (ex: 'players/santos/img.png') ou apenas 'santos/img.png'
-    Retorna path relativo 'players/<...>' se existir dentro de IMAGES_ROOT, ou None.
-    """
     s = user_input.strip()
     if s.startswith("players/"):
         rel = Path(s[len("players/"):])
@@ -177,34 +163,19 @@ def input_int(prompt, min_val=None, max_val=None, allow_empty=False, default=Non
             continue
         return v
 
-def choose_position(prompt="Position"):
-    print("Posições válidas:")
-    for i, p in enumerate(POSITION_CHOICES, start=1):
-        print(f"  {i}) {p}")
-    while True:
-        sel = input(f"{prompt} (digite número ou nome): ").strip()
-        if sel.isdigit():
-            idx = int(sel) - 1
-            if 0 <= idx < len(POSITION_CHOICES):
-                return POSITION_CHOICES[idx]
-        elif sel in POSITION_CHOICES:
-            return sel
-        print("Escolha inválida.")
+def compute_overall_gk(handling, positioning, reflex, speed):
+    return int(median([handling, positioning, reflex, speed]))
 
-def compute_overall_from_stats(attack, passing, defense, speed):
-    return int(median([attack, passing, defense, speed]))
-
-def create_player(conn):
-    print("\n--- Criar Jogador de Campo ---")
+def create_goleiro(conn):
+    print("\n--- Criar Goleiro ---")
     level = input_int("Level (0-5): ", min_val=0, max_val=5)
-    name = input_nonempty("Nome do jogador: ")
-    position = choose_position()
+    name = input_nonempty("Nome do goleiro: ")
+    # position fixo
+    position = "GoalkeeperZone"
 
-    # obrigatórios
     club = input_nonempty("Time (obrigatório): ")
     country = input_nonempty("País de origem (obrigatório): ")
 
-    # tenta listar imagens do time
     team_imgs = scan_images_for_team(club)
     photo_rel = None
     if team_imgs:
@@ -212,7 +183,6 @@ def create_player(conn):
         photo_rel = choose_from_list(team_imgs)
     else:
         print(f"\nNenhuma imagem encontrada nesse time: {club}")
-        # dá opções: buscar globalmente, digitar manualmente, ou cancelar
         while True:
             opt = input("Deseja (g) buscar globalmente, (m) digitar manualmente, (c) cancelar criação? [g/m/c]: ").strip().lower()
             if opt == "c":
@@ -237,67 +207,67 @@ def create_player(conn):
         print("Sem imagem selecionada — cancelando.")
         return
 
-    attack = input_int("Ataque (inteiro): ")
-    passing = input_int("Passe (inteiro): ")
-    defense = input_int("Defesa (inteiro): ")
+    handling = input_int("Manuseio (inteiro): ")
+    positioning = input_int("Posicionamento (inteiro): ")
+    reflex = input_int("Reflexo (inteiro): ")
     speed = input_int("Velocidade (inteiro): ")
 
     overall_input = input("Overall (enter para calcular pela mediana): ").strip()
     if overall_input == "":
-        overall = compute_overall_from_stats(attack, passing, defense, speed)
+        overall = compute_overall_gk(handling, positioning, reflex, speed)
         print(f"Overall calculado (mediana): {overall}")
     else:
         try:
             overall = int(overall_input)
-        except ValueError:
-            print("Overall inválido, usando cálculo automático.")
-            overall = compute_overall_from_stats(attack, passing, defense, speed)
+        except:
+            overall = compute_overall_gk(handling, positioning, reflex, speed)
 
-    player_id = str(uuid.uuid4())
+    gid = str(uuid.uuid4())
+    created_at = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     sql = """
-    INSERT INTO jogadores_campo
-      (id, level, name, position, club, country, photo_path, overall, attack, passing, defense, speed)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO jogadores_goleiros
+    (id, level, name, position, club, country, photo_path, overall, handling, positioning, reflex, speed, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
-    conn.execute(sql, (player_id, level, name, position, club, country, photo_rel,
-                       overall, attack, passing, defense, speed))
+    conn.execute(sql, (gid, level, name, position, club, country, photo_rel,
+                    overall, handling, positioning, reflex, speed, created_at))
     conn.commit()
-    print("Criado jogador com id:", player_id)
+    print("Goleiro criado com id:", gid)
     print("Imagem referenciada (path relativo para uso com static):", photo_rel)
 
-def list_players(conn):
-    print("\n--- Lista de Jogadores ---")
-    cur = conn.execute("SELECT id, name, position, club, overall FROM jogadores_campo ORDER BY overall DESC, name;")
+def list_goleiros(conn):
+    print("\n--- Lista de Goleiros ---")
+    cur = conn.execute("SELECT id, name, club, overall FROM jogadores_goleiros ORDER BY overall DESC, name;")
     rows = cur.fetchall()
     if not rows:
-        print("Nenhum jogador cadastrado.")
+        print("Nenhum goleiro cadastrado.")
         return
     for r in rows:
-        print(f"{r[0]} | {r[1]} | {r[2]} | {r[3] or '-'} | Overall: {r[4]}")
+        print(f"{r[0]} | {r[1]} | {r[2]} | Overall: {r[3]}")
     print(f"Total: {len(rows)}")
 
-def show_player(conn):
-    pid = input("Digite o id do jogador: ").strip()
-    cur = conn.execute("SELECT * FROM jogadores_campo WHERE id = ?", (pid,))
+def show_goleiro(conn):
+    gid = input("Digite o id do goleiro: ").strip()
+    cur = conn.execute("SELECT * FROM jogadores_goleiros WHERE id = ?", (gid,))
     r = cur.fetchone()
     if not r:
-        print("Jogador não encontrado.")
+        print("Goleiro não encontrado.")
         return
-    cols = [d[0] for d in conn.execute("PRAGMA table_info(jogadores_campo)").fetchall()]
+    cols = [d[0] for d in conn.execute("PRAGMA table_info(jogadores_goleiros)").fetchall()]
     print("\n--- Detalhes ---")
     for name, val in zip(cols, r):
         print(f"{name}: {val}")
 
-def update_player(conn):
-    pid = input("Digite o id do jogador a atualizar: ").strip()
-    cur = conn.execute("SELECT * FROM jogadores_campo WHERE id = ?", (pid,))
+def update_goleiro(conn):
+    gid = input("Digite o id do goleiro a atualizar: ").strip()
+    cur = conn.execute("SELECT * FROM jogadores_goleiros WHERE id = ?", (gid,))
     row = cur.fetchone()
     if not row:
-        print("Jogador não encontrado.")
+        print("Goleiro não encontrado.")
         return
 
     print("Pressione Enter para manter o valor atual.")
-    cols_info = conn.execute("PRAGMA table_info(jogadores_campo)").fetchall()
+    cols_info = conn.execute("PRAGMA table_info(jogadores_goleiros)").fetchall()
     cols = [c[1] for c in cols_info]
     current = dict(zip(cols, row))
 
@@ -309,22 +279,18 @@ def update_player(conn):
         return cast(s)
 
     level = prompt_update("level", int, "(0-5)")
-    if isinstance(level, str):
-        try:
-            level = int(level)
-        except:
-            level = current["level"]
+    try:
+        level = int(level)
+    except:
+        level = current["level"]
     if level < 0 or level > 5:
-        print("Level inválido, mantendo atual.")
         level = current["level"]
 
     name = prompt_update("name", str)
 
-    print("Posição atual:", current["position"])
-    if input("Deseja alterar a posição? (s/N): ").strip().lower() == "s":
-        position = choose_position()
-    else:
-        position = current["position"]
+    # position é fixo como GoalkeeperZone (mas mostramos)
+    print("Position (fixo):", current.get("position", "GoalkeeperZone"))
+    position = "GoalkeeperZone"
 
     club = prompt_update("club", str)
     if not club:
@@ -334,7 +300,6 @@ def update_player(conn):
     if not country:
         country = current["country"]
 
-    # se o club foi alterado, tentar imagens do novo club
     photo_path = current["photo_path"]
     if club != current["club"]:
         team_imgs = scan_images_for_team(club)
@@ -358,21 +323,19 @@ def update_player(conn):
                 else:
                     print("Caminho inválido; mantendo atual.")
     else:
-        # pedir se quer trocar a imagem
         if input("Deseja alterar a imagem? (s/N): ").strip().lower() == "s":
             sel = choose_image_interactive()
             if sel:
                 photo_path = sel
 
-    attack = prompt_update("attack", int)
-    passing = prompt_update("passing", int)
-    defense = prompt_update("defense", int)
+    handling = prompt_update("handling", int)
+    positioning = prompt_update("positioning", int)
+    reflex = prompt_update("reflex", int)
     speed = prompt_update("speed", int)
 
     overall_input = input(f"overall [{current.get('overall')}] (enter para recalcular/usar atual or number): ").strip()
     if overall_input == "":
-        overall = compute_overall_from_stats(attack, passing, defense, speed)
-        print(f"Overall recalculado: {overall}")
+        overall = compute_overall_gk(int(handling), int(positioning), int(reflex), int(speed))
     else:
         try:
             overall = int(overall_input)
@@ -380,29 +343,29 @@ def update_player(conn):
             overall = current.get("overall")
 
     sql = """
-    UPDATE jogadores_campo SET
+    UPDATE jogadores_goleiros SET
       level=?, name=?, position=?, club=?, country=?, photo_path=?,
-      overall=?, attack=?, passing=?, defense=?, speed=?
+      overall=?, handling=?, positioning=?, reflex=?, speed=?
     WHERE id=?
     """
     conn.execute(sql, (level, name, position, club, country, photo_path,
-                       overall, attack, passing, defense, speed, pid))
+                       overall, handling, positioning, reflex, speed, gid))
     conn.commit()
     print("Atualizado.")
 
-def delete_player(conn):
-    pid = input("Digite o id do jogador a deletar: ").strip()
-    confirm = input(f"Confirma exclusão de {pid}? (s/N): ").strip().lower()
+def delete_goleiro(conn):
+    gid = input("Digite o id do goleiro a deletar: ").strip()
+    confirm = input(f"Confirma exclusão de {gid}? (s/N): ").strip().lower()
     if confirm != "s":
         print("Operação cancelada.")
         return
-    conn.execute("DELETE FROM jogadores_campo WHERE id = ?", (pid,))
+    conn.execute("DELETE FROM jogadores_goleiros WHERE id = ?", (gid,))
     conn.commit()
     print("Deletado (se existia).")
 
-def find_by_name(conn):
+def find_goleiro_by_name(conn):
     q = input("Nome ou parte do nome para buscar: ").strip()
-    cur = conn.execute("SELECT id, name, position, overall FROM jogadores_campo WHERE name LIKE ? ORDER BY overall DESC;", (f"%{q}%",))
+    cur = conn.execute("SELECT id, name, club, overall FROM jogadores_goleiros WHERE name LIKE ? ORDER BY overall DESC;", (f"%{q}%",))
     rows = cur.fetchall()
     if not rows:
         print("Nenhum resultado.")
@@ -414,27 +377,27 @@ def menu():
     conn = ensure_db()
     try:
         while True:
-            print("\n=== CRUD Jogadores de Campo ===")
-            print("1) Listar jogadores")
-            print("2) Ver detalhes de um jogador (por id)")
-            print("3) Criar jogador")
-            print("4) Atualizar jogador")
-            print("5) Deletar jogador")
+            print("\n=== CRUD Goleiros ===")
+            print("1) Listar goleiros")
+            print("2) Ver detalhes de um goleiro (por id)")
+            print("3) Criar goleiro")
+            print("4) Atualizar goleiro")
+            print("5) Deletar goleiro")
             print("6) Buscar por nome")
             print("0) Sair")
             opt = input("Escolha: ").strip()
             if opt == "1":
-                list_players(conn)
+                list_goleiros(conn)
             elif opt == "2":
-                show_player(conn)
+                show_goleiro(conn)
             elif opt == "3":
-                create_player(conn)
+                create_goleiro(conn)
             elif opt == "4":
-                update_player(conn)
+                update_goleiro(conn)
             elif opt == "5":
-                delete_player(conn)
+                delete_goleiro(conn)
             elif opt == "6":
-                find_by_name(conn)
+                find_goleiro_by_name(conn)
             elif opt == "0":
                 break
             else:

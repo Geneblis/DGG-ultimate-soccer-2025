@@ -1,0 +1,119 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Loja — Jogadores</title>
+    <link rel="stylesheet" href="{% static 'css/style.css' %}" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="nav">
+        <a href="{% url 'home' %}">Home</a> |
+        <a href="{% url 'store' %}">Loja</a> |
+        <a href="{% url 'matches' %}">Jogos</a> |
+        <a href="{% url 'support' %}">Suporte</a>
+        <span style="float: right"><a href="{% url 'logout' %}">Sair</a></span>
+      </div>
+
+      <h2>Loja — Jogadores</h2>
+
+      <p>
+        <a class="btn" href="{% url 'store' %}">Voltar para Loja</a>
+      </p>
+
+      <h3>Jogadores de Campo</h3>
+      <div class="players-grid">
+        {% for p in field_players %}
+        <div class="player-card">
+          <div class="player-photo-wrap">
+            <img
+              class="player-photo"
+              src="{% static p.photo_path %}"
+              alt="{{ p.name }}"
+            />
+            <div class="badge overall-badge">{{ p.overall }}</div>
+            <div class="photo-meta">
+              <div class="meta-line">{{ p.position }}</div>
+              <div class="meta-line">{{ p.country }}</div>
+              <div class="meta-line">{{ p.club }}</div>
+            </div>
+            <div class="stats-bottom">
+              <div class="stat-col">
+                <div class="stat">
+                  <span class="stat-label">ATK</span
+                  ><span class="stat-value">{{ p.attack }}</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">PASS</span
+                  ><span class="stat-value">{{ p.passing }}</span>
+                </div>
+              </div>
+              <div class="stat-col">
+                <div class="stat">
+                  <span class="stat-label">DEF</span
+                  ><span class="stat-value">{{ p.defense }}</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">VEL</span
+                  ><span class="stat-value">{{ p.speed }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="player-name">{{ p.name }}</div>
+        </div>
+        {% empty %}
+        <p>Nenhum jogador de campo cadastrado.</p>
+        {% endfor %}
+      </div>
+
+      <h3>Goleiros</h3>
+      <div class="players-grid">
+        {% for g in goalkeepers %}
+        <div class="player-card">
+          <div class="player-photo-wrap">
+            <img
+              class="player-photo"
+              src="{% static g.photo_path %}"
+              alt="{{ g.name }}"
+            />
+            <div class="badge overall-badge">{{ g.overall }}</div>
+            <div class="photo-meta">
+              <div class="meta-line">{{ g.position }}</div>
+              <div class="meta-line">{{ g.country }}</div>
+              <div class="meta-line">{{ g.club }}</div>
+            </div>
+            <div class="stats-bottom">
+              <div class="stat-col">
+                <div class="stat">
+                  <span class="stat-label">HAND</span
+                  ><span class="stat-value">{{ g.handling }}</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">POS</span
+                  ><span class="stat-value">{{ g.positioning }}</span>
+                </div>
+              </div>
+              <div class="stat-col">
+                <div class="stat">
+                  <span class="stat-label">REF</span
+                  ><span class="stat-value">{{ g.reflex }}</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">VEL</span
+                  ><span class="stat-value">{{ g.speed }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="player-name">{{ g.name }}</div>
+        </div>
+        {% empty %}
+        <p>Nenhum goleiro cadastrado.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </body>
+</html>

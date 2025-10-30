@@ -3,7 +3,7 @@ import datetime
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.contrib.auth.hashers import make_password, check_password
-from .models import SistemasUser, JogadorCampo, InventoryItem
+from .models import SistemasUser, JogadorCampo, JogadorGoleiro, InventoryItem
 
 def _get_current_user(request):
     uid = request.session.get("user_id")
@@ -108,3 +108,26 @@ def missoes_view(request):
         return redirect("login")
     missoes = [{"id": 1, "title": "Train 3x", "reward": 50}, {"id": 2, "title": "Win a match", "reward": 100}]
     return render(request, "accounts/missions.html", {"user": user, "missoes": missoes})
+
+def store_players_view(request):
+    # reusa o _get_current_user que você já tem (ou usa request.session)
+    from .views import _get_current_user as _get_user_helper  # se _get_current_user está no mesmo arquivo ajuste conforme necessário
+    user = _get_user_helper(request)
+    if not user:
+        return redirect("login")
+
+    # buscar jogadores via ORM se os modelos existirem
+    field_players = []
+    goalkeepers = []
+    if JogadorCampo is not None:
+        field_players = list(JogadorCampo.objects.all().order_by("-overall", "name"))
+    if JogadorGoleiro is not None:
+        goalkeepers = list(JogadorGoleiro.objects.all().order_by("-overall", "name"))
+
+    # Se por acaso você não tiver os modelos (fallback), tenta ler direto do sqlite
+    # (normalmente não necessário). Mantive simples: se não tiver modelos, listas vazias.
+    return render(request, "accounts/store_players.html", {
+        "user": user,
+        "field_players": field_players,
+        "goalkeepers": goalkeepers,
+    })

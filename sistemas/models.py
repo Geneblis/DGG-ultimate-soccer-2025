@@ -22,6 +22,37 @@ class SistemasUser(models.Model):
     def __str__(self):
         return f"{self.username} <{self.email}>"
 
+class JogadorGoleiro(models.Model):
+    """
+    Tabela para goleiros: jogadores exclusivos com stats próprios.
+    db_table explícito: jogadores_goleiros
+    """
+    LEVEL_CHOICES = [(i, str(i)) for i in range(0, 6)]  # 0..5 (raridade/nível de carta)
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    level = models.IntegerField(default=0, validators=[MinValueValidator(0), MaxValueValidator(5)])
+    name = models.CharField(max_length=200)
+    position = models.CharField(max_length=20, default="GoalkeeperZone")  # sempre GoalkeeperZone
+    club = models.CharField(max_length=150)      # obrigatório
+    country = models.CharField(max_length=120)   # obrigatório
+    photo_path = models.CharField(max_length=500) # obrigatório — caminho relativo (players/...)
+    overall = models.IntegerField(default=0)     # calculado manualmente ou pela média se preferir
+
+    # atributos específicos de goleiro
+    handling = models.IntegerField(default=0)
+    positioning = models.IntegerField(default=0)
+    reflex = models.IntegerField(default=0)
+    speed = models.IntegerField(default=0)   # speed compartilhado com jogadores de campo
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "jogadores_goleiros"
+        ordering = ["-overall", "name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.club})"
+
 # Tabela de jogadores de campo (cards)
 class JogadorCampo(models.Model):
     LEVEL_CHOICES = [(i, str(i)) for i in range(0, 6)]  # 0..5
@@ -29,13 +60,11 @@ class JogadorCampo(models.Model):
     POSITION_OFF = "OffensiveZone"
     POSITION_NEU = "NeutralZone"
     POSITION_DEF = "DefensiveZone"
-    POSITION_GK  = "GoalkeeperZone"
 
     POSITION_CHOICES = [
         (POSITION_OFF, "OffensiveZone"),
         (POSITION_NEU, "NeutralZone"),
         (POSITION_DEF, "DefensiveZone"),
-        (POSITION_GK,  "GoalkeeperZone"),
     ]
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -49,7 +78,7 @@ class JogadorCampo(models.Model):
     attack = models.IntegerField(default=0)
     passing = models.IntegerField(default=0)
     defense = models.IntegerField(default=0)
-    aggression = models.IntegerField(default=0)
+    speed = models.IntegerField(default=0)
 
     class Meta:
         db_table = "jogadores_campo"
@@ -76,3 +105,4 @@ class InventoryItem(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.player.name} x{self.qty}"
+

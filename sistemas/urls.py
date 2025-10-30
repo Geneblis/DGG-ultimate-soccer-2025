@@ -17,4 +17,6 @@ urlpatterns = [
     # extras
     path("contracts/", views.contratos_view, name="contracts"),
     path("missions/", views.missoes_view, name="missions"),
+
+    path("store-players/", views.store_players_view, name="store_players"),
 ]
