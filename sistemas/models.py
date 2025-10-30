@@ -9,7 +9,7 @@ class SistemasUser(models.Model):
     """
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     username = models.CharField(max_length=150, unique=True)
-    full_name = models.CharField("nome", max_length=150, blank=True)
+    full_name = models.CharField("nome", max_length=150)
     email = models.EmailField(unique=True)
     password = models.CharField(max_length=128)  # armazenar hash com make_password
     created_at = models.DateTimeField(auto_now_add=True)
@@ -42,9 +42,9 @@ class JogadorCampo(models.Model):
     level = models.IntegerField(default=0, validators=[MinValueValidator(0), MaxValueValidator(5)])  # 0..5
     name = models.CharField(max_length=200)
     position = models.CharField(max_length=20, choices=POSITION_CHOICES)
-    club = models.CharField(max_length=150, blank=True)
-    country = models.CharField(max_length=120, blank=True)
-    photo_path = models.CharField(max_length=500, blank=True)  # caminho para a foto (path/URL)
+    club = models.CharField(max_length=150)
+    country = models.CharField(max_length=120)
+    photo_path = models.CharField(max_length=500)  # caminho para a foto (path/URL)
     overall = models.IntegerField(default=0)  # você disse que será calculado manualmente
     attack = models.IntegerField(default=0)
     passing = models.IntegerField(default=0)
