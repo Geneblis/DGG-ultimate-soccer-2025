@@ -35,11 +35,9 @@
               alt="{{ p.name }}"
             />
 
-            <!-- overall, posição -->
             <div class="badge overall-badge">{{ p.overall }}</div>
             <div class="position-abbr">{{ p.get_position_abbr }}</div>
 
-            <!-- bandeira + escudo + textos (empilhados) -->
             <div class="photo-meta">
               {% if p.flag_url %}
               <img class="flag" src="{{ p.flag_url }}" alt="{{ p.country }}" />
@@ -80,7 +78,7 @@
         </div>
 
         {% empty %}
-        <p>Nenhum jogador de campo cadastrado.</p>
+        <p>Nenhum jogador cadastrado.</p>
         {% endfor %}
       </div>
 
@@ -141,7 +139,7 @@
         </div>
 
         {% empty %}
-        <p>Nenhum jogador de campo cadastrado.</p>
+        <p>Nenhum jogador cadastrado.</p>
         {% endfor %}
       </div>
     </div>
