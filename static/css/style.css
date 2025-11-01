@@ -48,7 +48,7 @@ code {
   clear: both;
 }
 
-/* ===== player card improved (revisado para layout pedido) ===== */
+/* ===== Informacoes dos jogadores ===== */
 .players-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -57,75 +57,81 @@ code {
 }
 
 .player-card {
-  background: #fff;
-  border: 1px solid #e3e3e3;
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
-  text-align: center;
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  overflow: visible;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+  padding: 0;
 }
 
-/* photo area */
+/* wrapper com proporção exata da carta */
 .player-photo-wrap {
   position: relative;
   width: 100%;
-  background: #111;
+  aspect-ratio: 381 / 526;
+  overflow: hidden;
+  border-radius: 12px;
+  display: block;
+  background: #000;
 }
 
-/* imagem ocupa todo o topo */
+/* imagem cobre todo o wrapper */
 .player-photo {
-  display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: 300px;
+  height: 100%;
   object-fit: cover;
-  transform-origin: center;
+  display: block;
   transition: transform 0.25s ease;
 }
 .player-card:hover .player-photo {
   transform: scale(1.03);
 }
 
-/* overall badge (top-left) - maior e mais destacado */
+/* overall - canto superior esquerdo */
 .badge.overall-badge {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  background: rgba(0, 0, 0, 0.85);
+  top: 60px;
+  left: 12px;
+  bottom: 15px; /**/ /*pode remover se n gostar do efeito */
+  background: rgba(0, 0, 0, 0.35);
   color: #fff;
   padding: 8px 12px;
   font-weight: 900;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 18px;
-  letter-spacing: 0.5px;
+  z-index: 20;
 }
 
-/* posição abreviada (top-right) */
+/* posição - canto superior direito */
 .position-abbr {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 78px;
+  right: 12px;
   background: rgba(255, 255, 255, 0.95);
   color: #111;
   padding: 6px 9px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-weight: 800;
   font-size: 13px;
+  z-index: 40;
 }
 
-/* PHOTO META: empilha flag, club logo e linhas com país/time, logo abaixo do overall */
+/* grid da bandeira e club, orientacao por aqui. */
 .photo-meta {
   position: absolute;
-  left: 10px;
-  top: 56px; /* logo abaixo do overall */
+  left: 12px;
+  top: 110px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   align-items: flex-start;
-  color: #fff;
-  z-index: 6;
+  z-index: 35;
 }
 
-/* bandeira e escudo dentro do bloco .photo-meta (tam pequenos) */
+/* ignore esses 2, mexe apenas no de cima pfv. */
 .photo-meta .flag {
   width: 48px;
   height: 30px;
@@ -133,84 +139,72 @@ code {
   border-radius: 3px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
-
 .photo-meta .club-badge {
-  width: 44px;
-  height: 44px;
+  width: 42px;
+  height: 42px;
   object-fit: contain;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.95);
   padding: 3px;
   border-radius: 6px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
 
-/* linhas com país e time (texto) */
-.photo-meta .meta-line {
-  background: rgba(0, 0, 0, 0.45);
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-weight: 700;
-  font-size: 13px;
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-}
-
-/* footer dos stats: menor e posicionado apenas na base da foto */
-.stats-bottom {
+/* NOME grande central-baixo (overlay, acima dos stats) */
+.player-name-overlay {
   position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 100%;
-  background: linear-gradient(
-    0deg,
-    rgba(0, 0, 0, 0.8) 0%,
-    rgba(0, 0, 0, 0.25) 60%,
-    rgba(0, 0, 0, 0)
-  );
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 150px;
+  z-index: 36;
+  padding: 6px 12px;
+  font-weight: 900;
   color: #fff;
-  padding: 8px 12px;
-  box-sizing: border-box;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  min-height: 64px;
+  border-radius: 8px;
+  font-size: 18px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
-/* organiza 2 colunas com 2 linhas (cada coluna tem 2 stats) */
-.stat-col {
-  width: 50%;
+/* GRID DE STATS: 2 colunas x 2 linhas dentro da base da carta */
+.stats-grid {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 38px;
+  z-index: 66;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px 8px;
+  grid-template-rows: auto auto;
+  gap: 8px 18px;
+  align-items: end;
+  justify-items: stretch;
 }
 
-/* cada stat mostra label e valor alinhados (label à esquerda, valor à direita) */
-.stat {
+/* cada bloco de stat ocupa uma célula */
+.stat-block {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
   align-items: center;
-  font-size: 13px;
-  color: #fff;
+  justify-content: center;
 }
 
+/* label e valor estilizados (valor grande como no protótipo) */
 .stat-label {
-  opacity: 0.95;
-  font-weight: 700;
   font-size: 12px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.95);
+  margin-bottom: 4px;
   letter-spacing: 0.6px;
   text-transform: uppercase;
 }
 
 .stat-value {
+  font-size: 20px;
   font-weight: 900;
-  color: #ffe84d; /* destaque amarelo para os números, ajuste se quiser */
+  color: #ffe84d; /* destaque amarelo */
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
 }
 
-/* nome abaixo da foto */
 .player-name {
-  padding: 12px;
-  font-weight: 800;
-  border-top: 1px solid #f0f0f0;
-  font-size: 15px;
-  background: linear-gradient(180deg, #fff, #fafafa);
+  display: none;
 }
