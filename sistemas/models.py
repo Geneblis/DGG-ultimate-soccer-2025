@@ -167,7 +167,7 @@ class Pack(models.Model):
     name = models.CharField(max_length=140)
     price = models.IntegerField(default=0)
     description = models.TextField(blank=True)
-    image = models.CharField(max_length=255, blank=True)
+    image_path = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:

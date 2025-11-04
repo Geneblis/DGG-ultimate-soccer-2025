@@ -189,10 +189,22 @@ def packs_list_view(request):
             user = SistemasUser.objects.get(pk=uid)
         except SistemasUser.DoesNotExist:
             user = None
-    packs = Pack.objects.all().order_by("price")
+
+    packs_qs = Pack.objects.all().order_by("price")
+
+    packs = []
+    for p in packs_qs:
+        # normaliza atributo de imagem (aceita image, image_path, path_image)
+        image_field = getattr(p, "image_path", None) or getattr(p, "image", None) or getattr(p, "path_image", None)
+        # monta a URL que o template utilizará com {% static %}
+        packs.append({
+            "obj": p,
+            "image_field": image_field,  # caminho relativo, usado com {% static %}
+        })
+
     return render(request, "accounts/packs_list.html", {"packs": packs, "user": user})
 
-# detalhe do pack
+# --- detalhe do pack (mais claro e robusto) ---
 def pack_detail_view(request, pack_id):
     uid = request.session.get("user_id")
     user = None
@@ -201,19 +213,39 @@ def pack_detail_view(request, pack_id):
             user = SistemasUser.objects.get(pk=uid)
         except SistemasUser.DoesNotExist:
             user = None
-    pack = get_object_or_404(Pack, pk=pack_id)
+
+    pack = get_object_or_404(Pack, id=pack_id)
+
     entries = []
     for e in pack.entries.all():
-        # tenta puxar dados do jogador para exibição
         pdata = None
         if e.player_type == "field":
-            pdata = JogadorCampo.objects.filter(pk=e.player_id).first()
+            pdata = JogadorCampo.objects.filter(id=e.player_id).first()
         else:
-            pdata = JogadorGoleiro.objects.filter(pk=e.player_id).first()
-        entries.append({"entry": e, "player": pdata})
-    return render(request, "accounts/pack_detail.html", {"pack": pack, "entries": entries, "user": user})
+            pdata = JogadorGoleiro.objects.filter(id=e.player_id).first()
 
-# abrir (comprar) pack
+        # normaliza foto do player (aceita photo_path/ foto)
+        photo = None
+        if pdata is not None:
+            photo = getattr(pdata, "photo_path", None) or getattr(pdata, "photo", None)
+
+        entries.append({
+            "entry": e,
+            "player": pdata,
+            "player_photo": photo,
+        })
+
+    # pack image normalized como no list
+    image_field = getattr(pack, "image_path", None) or getattr(pack, "image", None) or getattr(pack, "path_image", None)
+
+    return render(request, "accounts/pack_detail.html", {
+        "pack": pack,
+        "pack_image": image_field,
+        "entries": entries,
+        "user": user
+    })
+
+# --- abrir pack (certifique-se que URL name usado no template é 'pack_open') ---
 @transaction.atomic
 def pack_open_view(request, pack_id):
     if request.method != "POST":
@@ -225,7 +257,7 @@ def pack_open_view(request, pack_id):
         return redirect("login")
 
     user = get_object_or_404(SistemasUser, pk=uid)
-    pack = get_object_or_404(Pack, pk=pack_id)
+    pack = get_object_or_404(Pack, id=pack_id)
 
     if user.coins < pack.price:
         messages.error(request, "Moedas insuficientes.")
@@ -236,27 +268,23 @@ def pack_open_view(request, pack_id):
         messages.error(request, "Pack vazio, contate o administrador.")
         return redirect("pack_detail", pack_id=pack_id)
 
-    # escolhas por peso
     weights = [max(1, int(e.weight or 1)) for e in entries]
     chosen_entry = random.choices(entries, weights=weights, k=1)[0]
 
-    # deduzir moedas e adicionar ao inventário de forma atômica
     user.coins -= pack.price
     user.save()
 
     item, created = add_player_to_user_inventory(user, chosen_entry.player_type, chosen_entry.player_id, amount=1)
     if item is None:
-        # jogador não encontrado — reembolsa
         user.coins += pack.price
         user.save()
         messages.error(request, "Erro ao adicionar jogador (não encontrado). Operação cancelada.")
         return redirect("pack_detail", pack_id=pack_id)
 
-    # buscar dados do jogador para exibir
     if chosen_entry.player_type == "field":
-        player_obj = JogadorCampo.objects.filter(pk=chosen_entry.player_id).first()
+        player_obj = JogadorCampo.objects.filter(id=chosen_entry.player_id).first()
     else:
-        player_obj = JogadorGoleiro.objects.filter(pk=chosen_entry.player_id).first()
+        player_obj = JogadorGoleiro.objects.filter(id=chosen_entry.player_id).first()
 
     messages.success(request, f"Você abriu {pack.name} e obteve {player_obj.name if player_obj else 'um jogador'}!")
     return render(request, "accounts/pack_result.html", {"pack": pack, "player": player_obj, "user": user})

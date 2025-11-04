@@ -8,35 +8,25 @@
   </head>
   <body>
     <div class="container">
-      <div class="nav">
-        <a href="{% url 'home' %}">Home</a> |
-        <a href="{% url 'store' %}">Loja</a> |
-        <a href="{% url 'packs_list' %}">Pacotes</a>
-        <span style="float: right">
-          {% if user %} Moedas: {{ user.coins }} |
-          <a href="{% url 'logout' %}">Sair</a> {% else %}<a
-            href="{% url 'login' %}"
-            >Login</a
-          >{% endif %}
-        </span>
-      </div>
+      <div class="nav">...</div>
 
       <h2>Packs Disponíveis</h2>
       <div class="packs-grid">
-        {% for pack in packs %}
+        {% for p in packs %}
         <div class="pack-card">
-          {% if pack.image %}
+          {% if p.image_field %}
           <img
-            src="{% static pack.image %}"
-            alt="{{ pack.name }}"
+            src="{% static p.image_field %}"
+            alt="{{ p.obj.name }}"
             style="max-width: 150px"
+            onerror="this.style.display='none'"
           />
           {% endif %}
-          <h3>{{ pack.name }}</h3>
-          <p>{{ pack.description }}</p>
-          <p>Preço: <strong>{{ pack.price }}</strong> moedas</p>
+          <h3>{{ p.obj.name }}</h3>
+          <p>{{ p.obj.description }}</p>
+          <p>Preço: <strong>{{ p.obj.price }}</strong> moedas</p>
           <p>
-            <a class="btn" href="{% url 'pack_detail' pack.id %}">Ver pack</a>
+            <a class="btn" href="{% url 'pack_detail' p.obj.id %}">Ver pack</a>
           </p>
         </div>
         {% empty %}

@@ -22,6 +22,6 @@ urlpatterns = [
 
     #packs
     path("packs/", views.packs_list_view, name="packs_list"),
+    path("packs/<str:pack_id>/open/", views.pack_open_view, name="pack_open"), 
     path("packs/<str:pack_id>/", views.pack_detail_view, name="pack_detail"),
-    path("packs/<str:pack_id>/open/", views.pack_open_view, name="pack_open"),
 ]
