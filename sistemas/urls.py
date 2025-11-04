@@ -19,4 +19,9 @@ urlpatterns = [
     path("missions/", views.missoes_view, name="missions"),
 
     path("store-players/", views.store_players_view, name="store_players"),
+
+    #packs
+    path("packs/", views.packs_list_view, name="packs_list"),
+    path("packs/<str:pack_id>/", views.pack_detail_view, name="pack_detail"),
+    path("packs/<str:pack_id>/open/", views.pack_open_view, name="pack_open"),
 ]

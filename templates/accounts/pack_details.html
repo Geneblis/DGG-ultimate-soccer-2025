@@ -1,0 +1,49 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ pack.name }}</title>
+  </head>
+  <body>
+    <div class="container">
+      <div class="nav">
+        <a href="{% url 'home' %}">Home</a> |
+        <a href="{% url 'store' %}">Loja</a> |
+        <a href="{% url 'packs_list' %}">Pacotes</a>
+      </div>
+
+      <h2>{{ pack.name }}</h2>
+      <p>{{ pack.description }}</p>
+      <p>Preço: {{ pack.price }} moedas</p>
+
+      <h3>Jogadores possíveis</h3>
+      <div class="players-grid">
+        {% for item in entries %}
+        <div class="player-card-small">
+          {% if item.player %}
+          <img
+            src="{% static item.player.photo_path %}"
+            style="width: 160px; height: auto"
+          />
+          <div>{{ item.player.name }}</div>
+          <div>Overall: {{ item.player.overall }}</div>
+          {% else %}
+          <div>
+            Jogador não encontrado: {{ item.entry.player_type }}:{{
+            item.entry.player_id }}
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+
+      <form method="post" action="{% url 'pack_open' pack.id %}">
+        {% csrf_token %}
+        <button type="submit" class="btn">
+          Abrir pack ({{ pack.price }} moedas)
+        </button>
+      </form>
+    </div>
+  </body>
+</html>

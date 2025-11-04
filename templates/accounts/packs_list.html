@@ -1,0 +1,48 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Packs</title>
+    <link rel="stylesheet" href="{% static 'css/style.css' %}" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="nav">
+        <a href="{% url 'home' %}">Home</a> |
+        <a href="{% url 'store' %}">Loja</a> |
+        <a href="{% url 'packs_list' %}">Pacotes</a>
+        <span style="float: right">
+          {% if user %} Moedas: {{ user.coins }} |
+          <a href="{% url 'logout' %}">Sair</a> {% else %}<a
+            href="{% url 'login' %}"
+            >Login</a
+          >{% endif %}
+        </span>
+      </div>
+
+      <h2>Packs Disponíveis</h2>
+      <div class="packs-grid">
+        {% for pack in packs %}
+        <div class="pack-card">
+          {% if pack.image %}
+          <img
+            src="{% static pack.image %}"
+            alt="{{ pack.name }}"
+            style="max-width: 150px"
+          />
+          {% endif %}
+          <h3>{{ pack.name }}</h3>
+          <p>{{ pack.description }}</p>
+          <p>Preço: <strong>{{ pack.price }}</strong> moedas</p>
+          <p>
+            <a class="btn" href="{% url 'pack_detail' pack.id %}">Ver pack</a>
+          </p>
+        </div>
+        {% empty %}
+        <p>Nenhum pack cadastrado.</p>
+        {% endfor %}
+      </div>
+    </div>
+  </body>
+</html>

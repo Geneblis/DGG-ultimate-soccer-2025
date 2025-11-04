@@ -1,7 +1,11 @@
 # sistemas/models.py
 import uuid
 from django.db import models
+from django.utils import timezone
+from django.contrib.contenttypes.models import ContentType
 from django.core.validators import MinValueValidator, MaxValueValidator
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.forms import ValidationError
 
 class SistemasUser(models.Model):
     """
@@ -97,22 +101,92 @@ class JogadorCampo(models.Model):
         return "N/A"
 
 
-# Inventário / Ownership: quantas cópias do jogador o user possui
 class InventoryItem(models.Model):
-    """
-    Tabela que liga usuários e jogadores: armazena quantidades e metadados.
-    """
     id = models.BigAutoField(primary_key=True)
     user = models.ForeignKey(SistemasUser, on_delete=models.CASCADE, related_name="inventory_items")
-    player = models.ForeignKey(JogadorCampo, on_delete=models.CASCADE, related_name="owned_by")
+
+    # generic relation -> aponta para JogadorCampo ou JogadorGoleiro
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.CharField(max_length=36)   # armazenamos UUID como string
+    content_object = GenericForeignKey("content_type", "object_id")
+
     qty = models.IntegerField(default=1, validators=[MinValueValidator(1)])
     obtained_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "sistemas_inventory"
-        unique_together = ("user", "player")
+        unique_together = ("user", "content_type", "object_id")
         ordering = ["-obtained_at"]
 
     def __str__(self):
-        return f"{self.user.username} - {self.player.name} x{self.qty}"
+        # tenta mostrar nome do player se possível
+        player = self.get_player()
+        player_name = getattr(player, "name", str(self.object_id))
+        return f"{self.user.username} - {player_name} x{self.qty}"
 
+    def clean(self):
+        allowed = {
+            ("sistemas", "jogadorcampo"),
+            ("sistemas", "jogadorgoleiro"),
+        }
+        ct = self.content_type
+        if ct is None:
+            raise ValidationError("content_type não pode ser nulo.")
+        key = (ct.app_label, ct.model)
+        if key not in allowed:
+            raise ValidationError("InventoryItem só aceita JogadorCampo ou JogadorGoleiro como alvo.")
+
+    def save(self, *args, **kwargs):
+        # chama clean para validação simples antes de salvar
+        self.clean()
+        # garantir object_id salvo como string (caso usuário passe UUID)
+        if hasattr(self.object_id, "hex"):
+            self.object_id = str(self.object_id)
+        super().save(*args, **kwargs)
+
+    def get_player(self):
+        """Retorna o objeto do jogador (ou None)."""
+        try:
+            return self.content_object
+        except Exception:
+            return None
+
+    def get_player_type(self):
+        """Retorna 'field' ou 'gk' conforme o modelo apontado."""
+        ct = self.content_type
+        if ct is None:
+            return None
+        if (ct.app_label, ct.model) == ("sistemas", "jogadorcampo"):
+            return "field"
+        if (ct.app_label, ct.model) == ("sistemas", "jogadorgoleiro"):
+            return "gk"
+        return "unknown"
+    
+class Pack(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=140)
+    price = models.IntegerField(default=0)
+    description = models.TextField(blank=True)
+    image = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "sistemas_packs"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} — {self.price} coins"
+
+class PackEntry(models.Model):
+    PLAYER_TYPE_CHOICES = [("field", "FieldPlayer"), ("gk", "Goalkeeper")]
+    id = models.AutoField(primary_key=True)
+    pack = models.ForeignKey(Pack, on_delete=models.CASCADE, related_name="entries")
+    player_type = models.CharField(max_length=8, choices=PLAYER_TYPE_CHOICES)
+    player_id = models.UUIDField()   # <- usa UUIDField ao invés de CharField
+    weight = models.IntegerField(default=1)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        db_table = "sistemas_packentry"
+        unique_together = (("pack", "player_type", "player_id"),)
+        ordering = ["-weight"]

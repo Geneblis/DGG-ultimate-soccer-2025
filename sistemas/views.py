@@ -1,10 +1,14 @@
 # sistemas/views.py
-import datetime
-from django.shortcuts import render, redirect
+import random
+from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
 from django.contrib.auth.hashers import make_password, check_password
-from .models import SistemasUser, JogadorCampo, JogadorGoleiro, InventoryItem
 from django.utils.text import slugify
+from django.db import transaction
+
+from .models import SistemasUser, JogadorCampo, JogadorGoleiro, InventoryItem, Pack, PackEntry, SistemasUser, JogadorCampo, JogadorGoleiro
+from .utils import add_player_to_user_inventory
+
 
 def _static_path_for_club_logo(player):
     """
@@ -176,3 +180,83 @@ def store_players_view(request):
         "field_players": field_players,
         "goalkeepers": goalkeepers,
     })
+
+def packs_list_view(request):
+    uid = request.session.get("user_id")
+    user = None
+    if uid:
+        try:
+            user = SistemasUser.objects.get(pk=uid)
+        except SistemasUser.DoesNotExist:
+            user = None
+    packs = Pack.objects.all().order_by("price")
+    return render(request, "accounts/packs_list.html", {"packs": packs, "user": user})
+
+# detalhe do pack
+def pack_detail_view(request, pack_id):
+    uid = request.session.get("user_id")
+    user = None
+    if uid:
+        try:
+            user = SistemasUser.objects.get(pk=uid)
+        except SistemasUser.DoesNotExist:
+            user = None
+    pack = get_object_or_404(Pack, pk=pack_id)
+    entries = []
+    for e in pack.entries.all():
+        # tenta puxar dados do jogador para exibição
+        pdata = None
+        if e.player_type == "field":
+            pdata = JogadorCampo.objects.filter(pk=e.player_id).first()
+        else:
+            pdata = JogadorGoleiro.objects.filter(pk=e.player_id).first()
+        entries.append({"entry": e, "player": pdata})
+    return render(request, "accounts/pack_detail.html", {"pack": pack, "entries": entries, "user": user})
+
+# abrir (comprar) pack
+@transaction.atomic
+def pack_open_view(request, pack_id):
+    if request.method != "POST":
+        return redirect("pack_detail", pack_id=pack_id)
+
+    uid = request.session.get("user_id")
+    if not uid:
+        messages.error(request, "Faça login para abrir packs.")
+        return redirect("login")
+
+    user = get_object_or_404(SistemasUser, pk=uid)
+    pack = get_object_or_404(Pack, pk=pack_id)
+
+    if user.coins < pack.price:
+        messages.error(request, "Moedas insuficientes.")
+        return redirect("pack_detail", pack_id=pack_id)
+
+    entries = list(pack.entries.all())
+    if not entries:
+        messages.error(request, "Pack vazio, contate o administrador.")
+        return redirect("pack_detail", pack_id=pack_id)
+
+    # escolhas por peso
+    weights = [max(1, int(e.weight or 1)) for e in entries]
+    chosen_entry = random.choices(entries, weights=weights, k=1)[0]
+
+    # deduzir moedas e adicionar ao inventário de forma atômica
+    user.coins -= pack.price
+    user.save()
+
+    item, created = add_player_to_user_inventory(user, chosen_entry.player_type, chosen_entry.player_id, amount=1)
+    if item is None:
+        # jogador não encontrado — reembolsa
+        user.coins += pack.price
+        user.save()
+        messages.error(request, "Erro ao adicionar jogador (não encontrado). Operação cancelada.")
+        return redirect("pack_detail", pack_id=pack_id)
+
+    # buscar dados do jogador para exibir
+    if chosen_entry.player_type == "field":
+        player_obj = JogadorCampo.objects.filter(pk=chosen_entry.player_id).first()
+    else:
+        player_obj = JogadorGoleiro.objects.filter(pk=chosen_entry.player_id).first()
+
+    messages.success(request, f"Você abriu {pack.name} e obteve {player_obj.name if player_obj else 'um jogador'}!")
+    return render(request, "accounts/pack_result.html", {"pack": pack, "player": player_obj, "user": user})
