@@ -193,10 +193,10 @@ def packs_list_view(request):
     packs_qs = Pack.objects.all().order_by("price")
 
     packs = []
-    for p in packs_qs:-
+    for p in packs_qs:
         packs.append({
             "obj": p,
-            "image_field": image_field,  # caminho relativo, usado com {% static %}
+            "image": p.image_path
         })
 
     return render(request, "accounts/packs_list.html", {"packs": packs, "user": user})

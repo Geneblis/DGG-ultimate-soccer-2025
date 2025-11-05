@@ -67,7 +67,7 @@ def choose_image_interactive():
     imgs = scan_pack_images()
     if not imgs:
         print("Nenhuma imagem encontrada em", IMAGES_ROOT)
-        print("Coloque imagens em imagens/webmedia/packs/ e rode novamente, ou digite caminho manual.")
+        print("Coloque imagens em webmedia/packs/ e rode novamente, ou digite caminho manual.")
         return None
     while True:
         for i, r in enumerate(imgs[:50], start=1):
@@ -78,10 +78,10 @@ def choose_image_interactive():
         if opt == "q":
             return None
         if opt == "m":
-            manual = input("Digite caminho relativo dentro de 'imagens/webmedia/packs/' (ex: event1/pack.png): ").strip()
+            manual = input("Digite caminho relativo dentro de 'webmedia/packs/' (ex: event1/pack.png): ").strip()
             p = IMAGES_ROOT / manual
             if p.exists() and p.is_file():
-                return str(Path("imagens/webmedia/packs") / manual).replace("\\","/")
+                return str(Path("webmedia/packs") / manual).replace("\\","/")
             print("Arquivo não encontrado.")
             continue
         if opt == "a":
@@ -90,13 +90,13 @@ def choose_image_interactive():
             sel = input("Número (ou enter p/voltar): ").strip()
             if sel.isdigit() and 1 <= int(sel) <= len(imgs):
                 chosen = imgs[int(sel)-1]
-                return str(Path("imagens/webmedia/packs") / chosen).replace("\\","/")
+                return str(Path("webmedia/packs") / chosen).replace("\\","/")
             continue
         if opt.isdigit():
             n = int(opt)
             if 1 <= n <= min(50, len(imgs)):
                 chosen = imgs[n-1]
-                return str(Path("imagens/webmedia/packs") / chosen).replace("\\","/")
+                return str(Path("webmedia/packs") / chosen).replace("\\","/")
         print("Opção inválida.")
 
 def input_nonempty(prompt):
