@@ -1,5 +1,5 @@
-{% load static %}
 <!DOCTYPE html>
+{% load static %}
 <html>
   <head>
     <meta charset="utf-8" />
@@ -14,14 +14,12 @@
       <div class="packs-grid">
         {% for p in packs %}
         <div class="pack-card">
-          {% if p.image_field %}
           <img
-            src="{% static p.image_field %}"
+            src="{% static p.obj.image_path %}"
             alt="{{ p.obj.name }}"
             style="max-width: 150px"
             onerror="this.style.display='none'"
           />
-          {% endif %}
           <h3>{{ p.obj.name }}</h3>
           <p>{{ p.obj.description }}</p>
           <p>Preço: <strong>{{ p.obj.price }}</strong> moedas</p>

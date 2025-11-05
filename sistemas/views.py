@@ -193,10 +193,7 @@ def packs_list_view(request):
     packs_qs = Pack.objects.all().order_by("price")
 
     packs = []
-    for p in packs_qs:
-        # normaliza atributo de imagem (aceita image, image_path, path_image)
-        image_field = getattr(p, "image_path", None) or getattr(p, "image", None) or getattr(p, "path_image", None)
-        # monta a URL que o template utilizará com {% static %}
+    for p in packs_qs:-
         packs.append({
             "obj": p,
             "image_field": image_field,  # caminho relativo, usado com {% static %}
