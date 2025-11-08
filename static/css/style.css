@@ -208,3 +208,55 @@ code {
 .player-name {
   display: none;
 }
+
+/* ----- modal pack ----- */
+/* ---------- mensagens ------------- */
+.messages { margin: 12px 0; }
+.message { padding: 10px 12px; border-radius: 6px; margin-bottom: 8px; }
+.message.error { background: #ffe6e6; color: #900; border: 1px solid #f5c6c6; }
+.message.success { background: #e7ffe7; color: #0a6; border: 1px solid #c7f0c7; }
+
+/* ---------- packs grid simples (ajuste conforme seu css existente) ---------- */
+.packs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+
+/* pack thumb */
+.pack-thumb { width: 100%; height: 150px; object-fit: cover; border-radius: 6px; }
+
+/* ----- Modal (CSS only using :target) ----- */
+.pack-modal { display: none; position: fixed; inset: 0; z-index: 2000; }
+.pack-modal:target { display: block; }
+.pack-modal-backdrop {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.55);
+}
+.pack-modal-content {
+  position: relative;
+  width: min(1100px, 95%);
+  max-height: 90vh;
+  margin: 4vh auto;
+  background: #fff;
+  border-radius: 10px;
+  overflow: auto;
+  padding: 18px;
+  z-index: 2010;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+}
+.modal-close {
+  position: absolute;
+  right: 12px;
+  top: 8px;
+  font-size: 24px;
+  text-decoration: none;
+  color: #333;
+}
+.pack-modal-grid { display: grid; grid-template-areas: "img desc" "cards cards" "footer footer"; grid-template-columns: 320px 1fr; gap: 16px; }
+.pack-modal-image { grid-area: img; display:flex; align-items:center; justify-content:center; }
+.pack-modal-image img { width: 280px; height: 280px; object-fit: cover; border-radius: 8px; }
+.pack-modal-desc { grid-area: desc; padding: 8px 12px; }
+.pack-modal-cards { grid-area: cards; display:flex; flex-wrap:wrap; gap: 12px; justify-content:center; padding: 12px; background: linear-gradient(180deg,#fafafa,#fff); border-radius:6px; }
+.player-card-small-modal { width: 160px; text-align:center; background:#fff; padding:6px; border-radius:6px; box-shadow:0 3px 8px rgba(0,0,0,0.06); }
+.player-card-small-modal img { width:100%; height:120px; object-fit:cover; border-radius:4px; }
+.pack-modal-footer { grid-area: footer; display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid #eee; margin-top:8px; }

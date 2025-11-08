@@ -1,10 +1,13 @@
 # sistemas/views.py
 import random
+import json
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
+from django.db import transaction
+from django.http import HttpResponseRedirect
+from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils.text import slugify
-from django.db import transaction
 
 from .models import SistemasUser, JogadorCampo, JogadorGoleiro, InventoryItem, Pack, PackEntry, SistemasUser, JogadorCampo, JogadorGoleiro
 from .utils import add_player_to_user_inventory
@@ -181,7 +184,14 @@ def store_players_view(request):
         "goalkeepers": goalkeepers,
     })
 
+@transaction.atomic
 def packs_list_view(request):
+    """
+    GET -> renderiza lista de packs (template accounts/packs_list.html).
+    POST -> form 'action=open' + 'pack_id' -> tenta abrir o pack (debita moedas e adiciona ao inventário),
+            depois redireciona para a própria lista com mensagens.
+    """
+    # --- usuário da sessão ---
     uid = request.session.get("user_id")
     user = None
     if uid:
@@ -190,98 +200,110 @@ def packs_list_view(request):
         except SistemasUser.DoesNotExist:
             user = None
 
-    packs_qs = Pack.objects.all().order_by("price")
+    # --- POST: abrir pack via form ---
+    if request.method == "POST":
+        action = request.POST.get("action")
+        if action == "open":
+            pack_id = request.POST.get("pack_id")
+            if not pack_id:
+                messages.error(request, "Pack inválido.")
+                return redirect("packs_list")
 
+            if not user:
+                messages.error(request, "Faça login para abrir packs.")
+                return redirect("login")
+
+            pack = get_object_or_404(Pack, pk=pack_id)
+
+            if user.coins < pack.price:
+                messages.error(request, "Moedas insuficientes.")
+                return redirect("packs_list")
+
+            entries = list(pack.entries.all())
+            if not entries:
+                messages.error(request, "Pack vazio. Contate o administrador.")
+                return redirect("packs_list")
+
+            # escolha por weight (fallback 1)
+            weights = [max(1, int(getattr(e, "weight", 1) or 1)) for e in entries]
+            chosen = random.choices(entries, weights=weights, k=1)[0]
+
+            # debitar moedas (atomic)
+            user.coins -= pack.price
+            user.save()
+
+            # tentar util add_player_to_user_inventory (caso você tenha)
+            item = None
+            try:
+                item, created = add_player_to_user_inventory(user, chosen.player_type, chosen.player_id, amount=1)
+            except Exception:
+                # fallback simples com ContentType + InventoryItem
+                try:
+                    if chosen.player_type == "field":
+                        ct = ContentType.objects.get_for_model(JogadorCampo)
+                    else:
+                        ct = ContentType.objects.get_for_model(JogadorGoleiro)
+                    inv, created = InventoryItem.objects.get_or_create(
+                        user=user,
+                        content_type=ct,
+                        object_id=str(chosen.player_id),
+                        defaults={"qty": 1}
+                    )
+                    if not created:
+                        inv.qty += 1
+                        inv.save()
+                    item = inv
+                except Exception:
+                    # reembolsa e mostra erro
+                    user.coins += pack.price
+                    user.save()
+                    messages.error(request, "Erro interno ao adicionar ao inventário. Tente novamente.")
+                    return redirect("packs_list")
+
+            # obter dados do jogador sorteado para exibir na mensagem
+            if chosen.player_type == "field":
+                pdata = JogadorCampo.objects.filter(pk=chosen.player_id).first()
+            else:
+                pdata = JogadorGoleiro.objects.filter(pk=chosen.player_id).first()
+
+            player_name = pdata.name if pdata else None
+
+            messages.success(request, f"Você abriu '{pack.name}' e obteve: {player_name or 'um jogador'} — custo: {pack.price} moedas. Moedas atuais: {user.coins}")
+            # redireciona para evitar repost
+            return redirect("packs_list")
+        else:
+            messages.error(request, "Ação inválida.")
+            return redirect("packs_list")
+
+    # --- GET: preparar dados para template ---
+    packs_qs = Pack.objects.all().order_by("price")
     packs = []
     for p in packs_qs:
+        # montar entries (só o necessário: id do jogador e photo_path) - template usará img
+        entries = []
+        for e in p.entries.all().order_by("-weight"):
+            pdata = None
+            if e.player_type == "field":
+                pdata = JogadorCampo.objects.filter(pk=e.player_id).first()
+            else:
+                pdata = JogadorGoleiro.objects.filter(pk=e.player_id).first()
+
+            photo = ""
+            if pdata:
+                photo = getattr(pdata, "photo_path", "") or getattr(pdata, "photo", "") or ""
+
+            entries.append({
+                "entry_id": e.id,
+                "player_type": e.player_type,
+                "player_id": str(e.player_id),
+                "photo": photo,
+            })
+
         packs.append({
             "obj": p,
-            "image": p.image_path
+            "entries": entries,
+            # normalize image path field name
+            "image_path": getattr(p, "image_path", "") or getattr(p, "image", "") or getattr(p, "path_image", "") or "",
         })
 
     return render(request, "accounts/packs_list.html", {"packs": packs, "user": user})
-
-# --- detalhe do pack (mais claro e robusto) ---
-def pack_detail_view(request, pack_id):
-    uid = request.session.get("user_id")
-    user = None
-    if uid:
-        try:
-            user = SistemasUser.objects.get(pk=uid)
-        except SistemasUser.DoesNotExist:
-            user = None
-
-    pack = get_object_or_404(Pack, id=pack_id)
-
-    entries = []
-    for e in pack.entries.all():
-        pdata = None
-        if e.player_type == "field":
-            pdata = JogadorCampo.objects.filter(id=e.player_id).first()
-        else:
-            pdata = JogadorGoleiro.objects.filter(id=e.player_id).first()
-
-        # normaliza foto do player (aceita photo_path/ foto)
-        photo = None
-        if pdata is not None:
-            photo = getattr(pdata, "photo_path", None) or getattr(pdata, "photo", None)
-
-        entries.append({
-            "entry": e,
-            "player": pdata,
-            "player_photo": photo,
-        })
-
-    # pack image normalized como no list
-    image_field = getattr(pack, "image_path", None) or getattr(pack, "image", None) or getattr(pack, "path_image", None)
-
-    return render(request, "accounts/pack_detail.html", {
-        "pack": pack,
-        "pack_image": image_field,
-        "entries": entries,
-        "user": user
-    })
-
-# --- abrir pack (certifique-se que URL name usado no template é 'pack_open') ---
-@transaction.atomic
-def pack_open_view(request, pack_id):
-    if request.method != "POST":
-        return redirect("pack_detail", pack_id=pack_id)
-
-    uid = request.session.get("user_id")
-    if not uid:
-        messages.error(request, "Faça login para abrir packs.")
-        return redirect("login")
-
-    user = get_object_or_404(SistemasUser, pk=uid)
-    pack = get_object_or_404(Pack, id=pack_id)
-
-    if user.coins < pack.price:
-        messages.error(request, "Moedas insuficientes.")
-        return redirect("pack_detail", pack_id=pack_id)
-
-    entries = list(pack.entries.all())
-    if not entries:
-        messages.error(request, "Pack vazio, contate o administrador.")
-        return redirect("pack_detail", pack_id=pack_id)
-
-    weights = [max(1, int(e.weight or 1)) for e in entries]
-    chosen_entry = random.choices(entries, weights=weights, k=1)[0]
-
-    user.coins -= pack.price
-    user.save()
-
-    item, created = add_player_to_user_inventory(user, chosen_entry.player_type, chosen_entry.player_id, amount=1)
-    if item is None:
-        user.coins += pack.price
-        user.save()
-        messages.error(request, "Erro ao adicionar jogador (não encontrado). Operação cancelada.")
-        return redirect("pack_detail", pack_id=pack_id)
-
-    if chosen_entry.player_type == "field":
-        player_obj = JogadorCampo.objects.filter(id=chosen_entry.player_id).first()
-    else:
-        player_obj = JogadorGoleiro.objects.filter(id=chosen_entry.player_id).first()
-
-    messages.success(request, f"Você abriu {pack.name} e obteve {player_obj.name if player_obj else 'um jogador'}!")
-    return render(request, "accounts/pack_result.html", {"pack": pack, "player": player_obj, "user": user})

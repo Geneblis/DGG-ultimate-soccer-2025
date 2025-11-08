@@ -1,5 +1,5 @@
-<!DOCTYPE html>
 {% load static %}
+<!DOCTYPE html>
 <html>
   <head>
     <meta charset="utf-8" />
@@ -8,29 +8,89 @@
   </head>
   <body>
     <div class="container">
-      <div class="nav">...</div>
+      <div class="nav"> ... </div>
+
+      <!-- Mostrar mensagens (resultados de abrir pack) -->
+      {% if messages %}
+      <div class="messages">
+        {% for msg in messages %}
+          <div class="message {{ msg.tags }}">{{ msg }}</div>
+        {% endfor %}
+      </div>
+      {% endif %}
 
       <h2>Packs Disponíveis</h2>
       <div class="packs-grid">
         {% for p in packs %}
-        <div class="pack-card">
-          <img
-            src="{% static p.obj.image_path %}"
-            alt="{{ p.obj.name }}"
-            style="max-width: 150px"
-            onerror="this.style.display='none'"
-          />
+        <div class="pack-card card">
+          {% if p.image_path %}
+            <img src="{% static p.image_path %}" alt="{{ p.obj.name }}" class="pack-thumb" />
+          {% endif %}
+
           <h3>{{ p.obj.name }}</h3>
           <p>{{ p.obj.description }}</p>
           <p>Preço: <strong>{{ p.obj.price }}</strong> moedas</p>
+
+          <!-- botão abre modal via âncora (CSS :target) -->
           <p>
-            <a class="btn" href="{% url 'pack_detail' p.obj.id %}">Ver pack</a>
+            <a class="btn" href="#pack-{{ p.obj.id }}">Ver pack</a>
           </p>
         </div>
-        {% empty %}
-        <p>Nenhum pack cadastrado.</p>
+
+        <!-- Modal CSS-only (id = anchor target) -->
+        <div id="pack-{{ p.obj.id }}" class="pack-modal">
+          <div class="pack-modal-backdrop"></div>
+          <div class="pack-modal-content">
+            <a href="#" class="modal-close" title="Fechar">×</a>
+
+            <div class="pack-modal-grid">
+              <div class="pack-modal-image">
+                {% if p.image_path %}
+                  <img src="{% static p.image_path %}" alt="{{ p.obj.name }}" />
+                {% else %}
+                  <img src="{% static 'webmedia/packs/placeholder.jpg' %}" alt="pack" />
+                {% endif %}
+              </div>
+
+              <div class="pack-modal-desc">
+                <h2>{{ p.obj.name }}</h2>
+                <p>{{ p.obj.description }}</p>
+                <p><strong>Preço:</strong> {{ p.obj.price }} moedas</p>
+
+                <!-- Form de compra (POST para a mesma URL) -->
+                <form method="post" action="{% url 'packs_list' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="open" />
+                  <input type="hidden" name="pack_id" value="{{ p.obj.id }}" />
+                  <button type="submit" class="btn">Confirmar compra e abrir pack</button>
+                </form>
+              </div>
+
+              <div class="pack-modal-cards">
+                {% if p.entries %}
+                  {% for e in p.entries %}
+                    <div class="player-card-small-modal">
+                      {% if e.photo %}
+                        <img src="{% static e.photo %}" alt="player" />
+                      {% else %}
+                        <img src="{% static 'webmedia/packs/generico.png' %}" alt="sem foto" />
+                      {% endif %}
+                    </div>
+                  {% endfor %}
+                {% else %}
+                  <div style="padding:12px">Nenhum jogador configurado neste pack.</div>
+                {% endif %}
+              </div>
+
+              <div class="pack-modal-footer">
+                <div>Preço: <strong>{{ p.obj.price }}</strong> moedas</div>
+                <div><a class="btn" href="#">Fechar</a></div>
+              </div>
+            </div>
+          </div>
+        </div>
         {% endfor %}
-      </div>
-    </div>
+      </div> <!-- .packs-grid -->
+    </div> <!-- .container -->
   </body>
 </html>
