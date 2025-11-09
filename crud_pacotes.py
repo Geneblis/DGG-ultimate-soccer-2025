@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
-CRUD Packs (versão compatível com esquema atual:
-sistemas_packentry: id, weight, note, pack_id, player_field_id, player_gk_id)
+CRUD Packs atualizado: each pack stores full player objects in JSON lists.
+- field_players, gk_players: lists of dicts:
+  { "id": "<uuid>", "weight": 1, "note": "", "name": "...", "club":"...", "photo_path":"...", "overall": 0, ...attrs... }
+- Includes a migration helper to migrate from old sistemas_packentry -> new JSON full objects.
 """
-import sqlite3, uuid, random, datetime, sys
+import sqlite3
+import uuid
+import random
+import datetime
+import sys
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -18,24 +25,9 @@ CREATE TABLE IF NOT EXISTS sistemas_packs (
     description TEXT,
     image_path TEXT,
     price INTEGER NOT NULL DEFAULT 0,
+    field_players TEXT DEFAULT '[]',
+    gk_players TEXT DEFAULT '[]',
     created_at TEXT NOT NULL
-);
-"""
-
-# cria packentry na ordem e formato que você informou (sem player_type)
-CREATE_PACKENTRY_SQL = """
-CREATE TABLE IF NOT EXISTS sistemas_packentry (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    weight INTEGER NOT NULL DEFAULT 1,
-    note VARCHAR(200) DEFAULT '',
-    pack_id TEXT NOT NULL,
-    player_field_id CHAR(36),
-    player_gk_id CHAR(36),
-    FOREIGN KEY(pack_id) REFERENCES sistemas_packs(id) ON DELETE CASCADE,
-    FOREIGN KEY(player_field_id) REFERENCES jogadores_campo(id),
-    FOREIGN KEY(player_gk_id) REFERENCES jogadores_goleiros(id),
-    UNIQUE(pack_id, player_field_id),
-    UNIQUE(pack_id, player_gk_id)
 );
 """
 
@@ -46,7 +38,6 @@ def ensure_db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.execute(CREATE_PACKS_SQL)
-    conn.execute(CREATE_PACKENTRY_SQL)
     conn.commit()
     return conn
 
@@ -99,17 +90,63 @@ def choose_image_interactive():
                 return str(Path("webmedia/packs") / chosen).replace("\\","/")
         print("Opção inválida.")
 
-def lookup_player_name(conn, pfid, pgid):
+# JSON helpers
+def _load_json_list(text):
     try:
-        if pfid:
-            r = conn.execute("SELECT name, club FROM jogadores_campo WHERE id = ? LIMIT 1", (pfid,)).fetchone()
-            if r: return f"{r['name']} ({r['club']})"
-        if pgid:
-            r = conn.execute("SELECT name, club FROM jogadores_goleiros WHERE id = ? LIMIT 1", (pgid,)).fetchone()
-            if r: return f"{r['name']} ({r['club']})"
-    except:
-        pass
-    return str(pfid or pgid or "")
+        if text is None or text == "":
+            return []
+        return json.loads(text)
+    except Exception:
+        return []
+
+def _dump_json_list(lst):
+    try:
+        return json.dumps(lst, ensure_ascii=False)
+    except Exception:
+        return "[]"
+
+# --- Player lookup helpers (pega o objeto completo do jogador por id) ---
+def fetch_field_player_object(conn, player_id):
+    """Retorna dict com dados completos do jogador de campo ou None."""
+    r = conn.execute(
+        "SELECT id, name, club, country, photo_path, overall, attack, passing, defense, speed FROM jogadores_campo WHERE id = ? LIMIT 1",
+        (player_id,)
+    ).fetchone()
+    if not r:
+        return None
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "club": r["club"],
+        "country": r["country"],
+        "photo_path": r["photo_path"],
+        "overall": r["overall"],
+        "attack": r["attack"],
+        "passing": r["passing"],
+        "defense": r["defense"],
+        "speed": r["speed"],
+    }
+
+def fetch_gk_player_object(conn, player_id):
+    """Retorna dict com dados completos do goleiro ou None."""
+    r = conn.execute(
+        "SELECT id, name, club, country, photo_path, overall, handling, positioning, reflex, speed FROM jogadores_goleiros WHERE id = ? LIMIT 1",
+        (player_id,)
+    ).fetchone()
+    if not r:
+        return None
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "club": r["club"],
+        "country": r["country"],
+        "photo_path": r["photo_path"],
+        "overall": r["overall"],
+        "handling": r["handling"],
+        "positioning": r["positioning"],
+        "reflex": r["reflex"],
+        "speed": r["speed"],
+    }
 
 # --- Packs CRUD ---
 
@@ -124,8 +161,8 @@ def create_pack(conn):
     pid = str(uuid.uuid4())
     try:
         conn.execute(
-            "INSERT INTO sistemas_packs (id, name, description, image_path, price, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (pid, name, description, image_path, price, created_at)
+            "INSERT INTO sistemas_packs (id, name, description, image_path, price, field_players, gk_players, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (pid, name, description, image_path, price, "[]", "[]", created_at)
         )
         conn.commit()
         print("Pack criado:", pid)
@@ -144,7 +181,7 @@ def list_packs(conn):
 
 def show_pack(conn):
     pid = input_nonempty("Digite o id do pack: ")
-    cur = conn.execute("SELECT id, name, description, image_path, price, created_at FROM sistemas_packs WHERE id = ?", (pid,))
+    cur = conn.execute("SELECT id, name, description, image_path, price, field_players, gk_players, created_at FROM sistemas_packs WHERE id = ?", (pid,))
     r = cur.fetchone()
     if not r:
         print("Pack não encontrado.")
@@ -156,21 +193,28 @@ def show_pack(conn):
     print("Imagem (relative):", r["image_path"] or "-")
     print("Preço:", r["price"])
     print("Criado:", r["created_at"])
-    cur = conn.execute(
-        "SELECT id, weight, note, player_field_id, player_gk_id FROM sistemas_packentry WHERE pack_id = ? ORDER BY weight DESC, id",
-        (pid,))
-    entries = cur.fetchall()
-    if not entries:
-        print("Nenhum jogador associado a esse pack.")
+
+    field_entries = _load_json_list(r["field_players"])
+    gk_entries = _load_json_list(r["gk_players"])
+
+    if not field_entries and not gk_entries:
+        print("\nNenhum jogador associado a esse pack.")
         return
-    print("\nJogadores possíveis no pack:")
-    for e in entries:
-        pfid = e["player_field_id"]
-        pgid = e["player_gk_id"]
-        ptype = "field" if pfid else ("gk" if pgid else "unknown")
-        pid_show = pfid or pgid or ""
-        name = lookup_player_name(conn, pfid, pgid)
-        print(f"  entry_id={e['id']} | type={ptype} | player_id={pid_show} | weight={e['weight']} -> {name} | note: {e['note'] or '-'}")
+
+    print("\nJogadores possíveis no pack (objetos completos):")
+    for e in field_entries:
+        print_entry_object(e, "field")
+    for e in gk_entries:
+        print_entry_object(e, "gk")
+
+def print_entry_object(e, typ):
+    pid_show = e.get("id")
+    name = e.get("name") or pid_show
+    club = e.get("club", "")
+    overall = e.get("overall", "")
+    weight = e.get("weight", 1)
+    note = e.get("note", "")
+    print(f"  type={typ} | player_id={pid_show} | weight={weight} -> {name} ({club}) overall={overall} | note: {note or '-'}")
 
 def delete_pack(conn):
     pid = input_nonempty("Digite o id do pack a deletar: ")
@@ -178,7 +222,6 @@ def delete_pack(conn):
     if confirm != "s":
         print("Cancelado.")
         return
-    conn.execute("DELETE FROM sistemas_packentry WHERE pack_id = ?", (pid,))
     conn.execute("DELETE FROM sistemas_packs WHERE id = ?", (pid,))
     conn.commit()
     print("Deletado (se existia).")
@@ -206,19 +249,22 @@ def update_pack(conn):
     conn.commit()
     print("Atualizado.")
 
-# --- PackEntry (usando apenas player_field_id / player_gk_id) ---
+# --- Add / Remove players storing full object ---
 
 def add_player_to_pack(conn):
     pid = input_nonempty("Digite o id do pack: ")
-    cur = conn.execute("SELECT id FROM sistemas_packs WHERE id = ?", (pid,))
-    if not cur.fetchone():
+    cur = conn.execute("SELECT id, field_players, gk_players FROM sistemas_packs WHERE id = ?", (pid,))
+    row = cur.fetchone()
+    if not row:
         print("Pack não encontrado.")
         return
+
     print("Adicionar jogador ao pack: escolha tipo e id do jogador.")
     ptype = input("Tipo ('field' para jogador de campo, 'gk' para goleiro): ").strip().lower()
     if ptype not in ("field", "gk"):
         print("Tipo inválido.")
         return
+
     player_id = input_nonempty("Digite o player id (UUID) (ou digite 'search' para procurar): ")
     if player_id.lower() == "search":
         q = input("Procurar por nome (parte): ").strip()
@@ -236,45 +282,83 @@ def add_player_to_pack(conn):
             print("Escolha inválida.")
             return
         player_id = rows[int(sel)-1]["id"]
+
     weight = input_int("Weight (probabilidade relativa, inteiro, default 1): ", default=1) or 1
     note = input("Observação (opcional): ").strip() or ""
-    try:
-        if ptype == "field":
-            conn.execute(
-                "INSERT INTO sistemas_packentry (weight, note, pack_id, player_field_id, player_gk_id) VALUES (?, ?, ?, ?, ?)",
-                (int(weight), note, pid, str(player_id), None)
-            )
-        else:
-            conn.execute(
-                "INSERT INTO sistemas_packentry (weight, note, pack_id, player_field_id, player_gk_id) VALUES (?, ?, ?, ?, ?)",
-                (int(weight), note, pid, None, str(player_id))
-            )
-        conn.commit()
-        print("Adicionado.")
-    except sqlite3.IntegrityError as e:
-        msg = str(e)
-        if "UNIQUE constraint failed" in msg:
-            print("Este jogador já está associado a esse pack (entrada duplicada).")
-        elif "CHECK constraint failed" in msg:
-            print("Erro de integridade (verifique valores).")
-        else:
-            print("Erro ao adicionar entry:", e)
 
-def remove_entry(conn):
-    eid = input_nonempty("Digite entry id para remover: ")
-    cur = conn.execute("SELECT id FROM sistemas_packentry WHERE id = ?", (eid,))
-    if not cur.fetchone():
-        print("Entry não encontrado.")
+    # fetch full object from players table
+    player_obj = None
+    if ptype == "field":
+        player_obj = fetch_field_player_object(conn, player_id)
+    else:
+        player_obj = fetch_gk_player_object(conn, player_id)
+
+    if player_obj is None:
+        print("Jogador não encontrado nas tabelas de jogadores; você ainda pode adicionar manualmente os campos.")
+        # perguntar se quer adicionar manualmente
+        if input("Adicionar manualmente com apenas ID (s/N)? ").strip().lower() != "s":
+            print("Cancelado.")
+            return
+        # minimal object
+        player_obj = {"id": str(player_id), "name": str(player_id)}
+
+    # attach weight & note (do not overwrite player fields)
+    entry = dict(player_obj)
+    entry["weight"] = int(weight or 1)
+    entry["note"] = note or ""
+
+    field_entries = _load_json_list(row["field_players"])
+    gk_entries = _load_json_list(row["gk_players"])
+    target_list = field_entries if ptype == "field" else gk_entries
+
+    # prevent duplicate by id
+    if any(str(x.get("id")) == str(entry["id"]) for x in target_list):
+        print("Este jogador já está associado a esse pack (entrada duplicada).")
         return
-    conn.execute("DELETE FROM sistemas_packentry WHERE id = ?", (eid,))
-    conn.commit()
-    print("Removido.")
 
-# --- Abrir pack (simulação) ---
+    if ptype == "field":
+        field_entries.append(entry)
+    else:
+        gk_entries.append(entry)
+
+    conn.execute(
+        "UPDATE sistemas_packs SET field_players = ?, gk_players = ? WHERE id = ?",
+        (_dump_json_list(field_entries), _dump_json_list(gk_entries), pid)
+    )
+    conn.commit()
+    print("Adicionado (objeto completo salvo no JSON).")
+
+def remove_player_from_pack(conn):
+    pid = input_nonempty("Digite o id do pack: ")
+    cur = conn.execute("SELECT id, field_players, gk_players FROM sistemas_packs WHERE id = ?", (pid,))
+    row = cur.fetchone()
+    if not row:
+        print("Pack não encontrado.")
+        return
+    player_id = input_nonempty("Digite o player id (UUID) a remover: ")
+    field_entries = _load_json_list(row["field_players"])
+    gk_entries = _load_json_list(row["gk_players"])
+
+    fid = str(player_id)
+    new_field = [x for x in field_entries if str(x.get("id")) != fid]
+    new_gk = [x for x in gk_entries if str(x.get("id")) != fid]
+
+    if len(new_field) == len(field_entries) and len(new_gk) == len(gk_entries):
+        print("Player id não encontrado neste pack.")
+        return
+
+    conn.execute(
+        "UPDATE sistemas_packs SET field_players = ?, gk_players = ? WHERE id = ?",
+        (_dump_json_list(new_field), _dump_json_list(new_gk), pid)
+    )
+    conn.commit()
+    print("Removido (se existia).")
+
+# --- Open pack for user (uses stored full object) ---
 def open_pack_for_user(conn):
     user_id = input_nonempty("User id (UUID): ")
     pack_id = input_nonempty("Pack id (UUID): ")
-    r = conn.execute("SELECT price FROM sistemas_packs WHERE id = ?", (pack_id,)).fetchone()
+    r = conn.execute("SELECT price, field_players, gk_players FROM sistemas_packs WHERE id = ?", (pack_id,)).fetchone()
     if not r:
         print("Pack não encontrado."); return
     price = r["price"]
@@ -285,20 +369,29 @@ def open_pack_for_user(conn):
     if coins < price:
         print("User não tem moedas suficientes:", coins, "<", price); return
 
-    entries = conn.execute("SELECT id, weight, player_field_id, player_gk_id FROM sistemas_packentry WHERE pack_id = ?", (pack_id,)).fetchall()
+    field_entries = _load_json_list(r["field_players"])
+    gk_entries = _load_json_list(r["gk_players"])
+    entries = []
+    for e in field_entries:
+        item = dict(e); item["type"] = "field"; entries.append(item)
+    for e in gk_entries:
+        item = dict(e); item["type"] = "gk"; entries.append(item)
+
     if not entries:
         print("Pack vazio (nenhuma entry)."); return
 
-    weights = [e["weight"] for e in entries]
-    choice = random.choices(entries, weights=weights, k=1)[0]
-    pfid = choice["player_field_id"]
-    pgid = choice["player_gk_id"]
-    pid_used = pfid or pgid
-    player_name = lookup_player_name(conn, pfid, pgid)
-    ptype = "field" if pfid else "gk"
+    weights = [max(0, int(e.get("weight", 0) or 0)) for e in entries]
+    if sum(weights) == 0:
+        print("Pack sem entradas ponderadas (weights = 0)."); return
 
+    chosen = random.choices(entries, weights=weights, k=1)[0]
+    pid_used = chosen.get("id")
+    ptype = chosen.get("type")
+    player_name = chosen.get("name") or str(pid_used)
+    # debitar moedas
     conn.execute("UPDATE sistemas_users SET coins = coins - ? WHERE id = ?", (price, user_id))
 
+    # inserir no inventário: temos ID e tipo; o objeto completo também é armazenado
     inserted = False
     try:
         cols_info = conn.execute("PRAGMA table_info(sistemas_inventory)").fetchall()
@@ -336,19 +429,83 @@ def open_pack_for_user(conn):
     print(f"Pack aberto! Jogador recebido: {player_name} (type={ptype} id={pid_used})")
     print("Inserido no inventário do usuário." if inserted else "Não foi possível inserir automaticamente no inventário (verificar esquema).")
 
+# --- Migration helper from old sistemas_packentry to full objects ---
+def migrate_packentries_to_full_objects(conn, dry_run=False):
+    """
+    Se existir a tabela sistemas_packentry, converte os registros para os novos campos JSON.
+    - dry_run=True apenas mostra o que seria feito.
+    """
+    # verifica se tabela antiga existe
+    try:
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sistemas_packentry'").fetchone()
+        if not cur:
+            print("Tabela sistemas_packentry não existe — nada a migrar.")
+            return
+    except Exception as exc:
+        print("Erro ao checar tabelas:", exc)
+        return
+
+    packs = conn.execute("SELECT id FROM sistemas_packs").fetchall()
+    if not packs:
+        print("Nenhum pack cadastrado para migrar.")
+        return
+
+    for p in packs:
+        pid = p["id"]
+        entries = conn.execute(
+            "SELECT id, weight, note, player_field_id, player_gk_id FROM sistemas_packentry WHERE pack_id = ? ORDER BY weight DESC, id",
+            (pid,)
+        ).fetchall()
+        if not entries:
+            continue
+        new_field = _load_json_list(conn.execute("SELECT field_players FROM sistemas_packs WHERE id = ?", (pid,)).fetchone()["field_players"])
+        new_gk = _load_json_list(conn.execute("SELECT gk_players FROM sistemas_packs WHERE id = ?", (pid,)).fetchone()["gk_players"])
+        changed = False
+        for e in entries:
+            pfid = e["player_field_id"]
+            pgid = e["player_gk_id"]
+            weight = int(e["weight"] or 1)
+            note = e["note"] or ""
+            if pfid:
+                obj = fetch_field_player_object(conn, pfid) or {"id": str(pfid)}
+                obj["weight"] = weight
+                obj["note"] = note
+                # prevent dup
+                if not any(str(x.get("id")) == str(obj["id"]) for x in new_field):
+                    new_field.append(obj)
+                    changed = True
+            elif pgid:
+                obj = fetch_gk_player_object(conn, pgid) or {"id": str(pgid)}
+                obj["weight"] = weight
+                obj["note"] = note
+                if not any(str(x.get("id")) == str(obj["id"]) for x in new_gk):
+                    new_gk.append(obj)
+                    changed = True
+        if changed:
+            print(f"Migrando pack {pid}: adicionando {len(new_field)} field + {len(new_gk)} gk entries (commit={not dry_run})")
+            if not dry_run:
+                conn.execute("UPDATE sistemas_packs SET field_players = ?, gk_players = ? WHERE id = ?",
+                             (_dump_json_list(new_field), _dump_json_list(new_gk), pid))
+    if not dry_run:
+        conn.commit()
+        print("Migração concluída e gravada.")
+    else:
+        print("Dry run concluído. Nenhuma alteração gravada.")
+
 def menu():
     conn = ensure_db()
     try:
         while True:
-            print("\n=== CRUD Packs ===")
+            print("\n=== CRUD Packs (full object JSON) ===")
             print("1) Listar packs")
             print("2) Ver pack (detalhes)")
             print("3) Criar pack")
             print("4) Atualizar pack")
             print("5) Deletar pack")
-            print("6) Adicionar jogador ao pack")
-            print("7) Remover jogador do pack (entry id)")
+            print("6) Adicionar jogador ao pack (guarda objeto completo)")
+            print("7) Remover jogador do pack (por player id)")
             print("8) Abrir pack para user (simulação)")
+            print("9) Migrar sistemas_packentry -> JSON full objects (dry-run primeiro!)")
             print("0) Sair")
             opt = input("Escolha: ").strip()
             if opt == "1": list_packs(conn)
@@ -357,8 +514,13 @@ def menu():
             elif opt == "4": update_pack(conn)
             elif opt == "5": delete_pack(conn)
             elif opt == "6": add_player_to_pack(conn)
-            elif opt == "7": remove_entry(conn)
+            elif opt == "7": remove_player_from_pack(conn)
             elif opt == "8": open_pack_for_user(conn)
+            elif opt == "9":
+                if input("Dry run? (s/N): ").strip().lower() == "s":
+                    migrate_packentries_to_full_objects(conn, dry_run=True)
+                else:
+                    migrate_packentries_to_full_objects(conn, dry_run=False)
             elif opt == "0": break
             else: print("Inválido.")
     finally:

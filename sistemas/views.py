@@ -1,36 +1,30 @@
-# sistemas/views.py
+# ===== Standard Library =====
 import random
 import json
+import uuid
+import unicodedata
+
+# ===== Django Core =====
 from django.shortcuts import render, get_object_or_404, redirect
+from django.db import transaction, connection
 from django.contrib import messages
-from django.db import transaction
 from django.http import JsonResponse, HttpResponseForbidden, HttpResponseBadRequest
-from django.contrib.contenttypes.models import ContentType
+from django.views.decorators.http import require_POST, require_http_methods
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils.text import slugify
-from django.views.decorators.http import require_POST
-from .models import (
-    SistemasUser, JogadorCampo, JogadorGoleiro,
-    InventoryItem, Pack, PackEntry
-)
 
-# colocar no topo do arquivo, se ainda não tiver
-import uuid
-import unicodedata
-
-# ... outros imports já existentes ...
-from django.shortcuts import render, redirect
-from django.db import transaction
-from django.contrib import messages
-from django.views.decorators.http import require_http_methods
+# ===== Django ContentTypes =====
 from django.contrib.contenttypes.models import ContentType
 
-import uuid
-import unicodedata
-from django.db import connection
+# ===== Local Models =====
+from .models import (
+    SistemasUser, JogadorCampo, JogadorGoleiro,
+    InventoryItem, Pack
+)
 
-from .models import Pack, PackEntry, JogadorCampo, JogadorGoleiro, InventoryItem, SistemasUser
+import logging
 
+logger = logging.getLogger(__name__)
 
 
 def _static_path_for_club_logo(player):
@@ -206,134 +200,206 @@ def store_players_view(request):
         "goalkeepers": goalkeepers,
     })
 
-@require_http_methods(["GET", "POST"])
-@transaction.atomic
+@require_http_methods(["GET"])
 def packs_list_view(request):
+    """
+    Lista packs (GET).
+    Se ?open=<pack_id> for passado, popula os jogadores desse pack (name + photo_path)
+    buscando do DB apenas os IDs presentes no JSON do Pack.
+    """
     user = _get_current_user(request)
     if not user:
         return redirect("/login/")
 
-    if request.method == "POST":
-        raw = request.POST.get("pack_id")
-        if raw is None:
-            messages.error(request, "Pack inválido (id ausente).")
-            return redirect("/packs/")
-
-        # normalizar e sanitizar input
-        normalized = unicodedata.normalize("NFKC", str(raw))
-        sanitized = normalized.strip().strip("'\"")
-        for z in ["\u200b", "\u200c", "\u200d", "\ufeff", "\u200e", "\u200f"]:
-            sanitized = sanitized.replace(z, "")
-        sanitized = sanitized.strip()
-
-        # tentar converter pra UUID canônico
-        uuid_obj = None
-        try:
-            uuid_obj = uuid.UUID(sanitized)
-            sanitized = str(uuid_obj)
-        except Exception:
-            uuid_obj = None
-
-        # tentativa direta pelo ORM
-        pack = None
-        if uuid_obj is not None:
-            pack = Pack.objects.filter(pk=uuid_obj).first()
-        if pack is None:
-            pack = Pack.objects.filter(pk=sanitized).first()
-
-        # fallback robusto: comparar str(ex) com sanitized e depois buscar com o UUID existente
-        if pack is None:
-            for ex in Pack.objects.values_list("id", flat=True)[:200]:
-                try:
-                    if str(ex) == sanitized:
-                        pack = Pack.objects.filter(pk=ex).first()
-                        if pack:
-                            break
-                except Exception:
-                    continue
-
-        if pack is None:
-            messages.error(request, "Pack não encontrado. Recarregue a página ou verifique o template.")
-            return redirect("/packs/")
-
-        # lock do usuário
-        user = SistemasUser.objects.select_for_update().get(pk=user.pk)
-        if getattr(user, "coins", 0) < pack.price:
-            messages.error(request, "Moedas insuficientes.")
-            return redirect("/packs/")
-
-        entries = list(PackEntry.objects.filter(pack=pack).select_related("player_field", "player_gk"))
-        if not entries:
-            messages.error(request, "Pack vazio.")
-            return redirect("/packs/")
-
-        # construir ponderação
-        weighted = []
-        tot = 0
-        for e in entries:
-            w = max(0, int(e.weight or 0))
-            if w <= 0:
-                continue
-            tot += w
-            weighted.append((e, tot))
-        if tot == 0:
-            messages.error(request, "Pack sem entradas ponderadas.")
-            return redirect("/packs/")
-
-        r = random.randint(1, tot)
-        chosen = None
-        for e, cum in weighted:
-            if r <= cum:
-                chosen = e
-                break
-        if chosen is None:
-            messages.error(request, "Erro ao selecionar jogador.")
-            return redirect("/packs/")
-
-        if chosen.player_field_id:
-            player_obj = chosen.player_field
-            ct = ContentType.objects.get_for_model(JogadorCampo)
-            p_type = "field"
-        elif chosen.player_gk_id:
-            player_obj = chosen.player_gk
-            ct = ContentType.objects.get_for_model(JogadorGoleiro)
-            p_type = "gk"
-        else:
-            messages.error(request, "Entrada inválida.")
-            return redirect("/packs/")
-
-        obj_id = str(player_obj.id)
-        inv, created = InventoryItem.objects.get_or_create(
-            user=user, content_type=ct, object_id=obj_id, defaults={"qty": 1}
-        )
-        if not created:
-            inv.qty = inv.qty + 1
-            inv.save()
-
-        user.coins = user.coins - pack.price
-        user.save()
-
-        request.session["last_win"] = {
-            "id": obj_id,
-            "name": player_obj.name,
-            "type": p_type,
-            "photo_path": player_obj.photo_path,
-            "overall": getattr(player_obj, "overall", 0),
-            "pack_name": pack.name,
-        }
-        return redirect("/packs/#result")
-
-    # GET: listar packs (sem revelar entries)
+    open_pack_id = request.GET.get("open")
     packs_qs = Pack.objects.all().order_by("-created_at")
     packs = []
+
+    def _ensure_list(v):
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return v
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return []
+        return []
+
     for p in packs_qs:
-        packs.append({
+        pack_dict = {
             "id": str(p.id),
             "name": p.name,
             "price": p.price,
             "description": p.description,
             "image_path": p.image_path,
-        })
+            "field_players": [],
+            "gk_players": [],
+        }
+
+        if open_pack_id and str(p.id) == str(open_pack_id):
+            raw_field = getattr(p, "field_players", None)
+            raw_gk = getattr(p, "gk_players", None)
+            field_entries = _ensure_list(raw_field)
+            gk_entries = _ensure_list(raw_gk)
+
+            field_ids = [str(e.get("id")) for e in field_entries if e.get("id")]
+            gk_ids = [str(e.get("id")) for e in gk_entries if e.get("id")]
+
+            field_map = {}
+            if field_ids:
+                qs_field = JogadorCampo.objects.filter(id__in=field_ids).values("id", "name", "photo_path")
+                for r in qs_field:
+                    field_map[str(r["id"])] = {"id": str(r["id"]), "name": r["name"], "photo_path": r["photo_path"]}
+
+            gk_map = {}
+            if gk_ids:
+                qs_gk = JogadorGoleiro.objects.filter(id__in=gk_ids).values("id", "name", "photo_path")
+                for r in qs_gk:
+                    gk_map[str(r["id"])] = {"id": str(r["id"]), "name": r["name"], "photo_path": r["photo_path"]}
+
+            final_field = []
+            for e in field_entries:
+                pid = str(e.get("id", ""))
+                src = field_map.get(pid)
+                if src:
+                    final_field.append({"id": pid, "name": src.get("name"), "photo_path": src.get("photo_path")})
+                else:
+                    final_field.append({"id": pid, "name": e.get("name") or pid, "photo_path": e.get("photo_path") or ""})
+
+            final_gk = []
+            for e in gk_entries:
+                pid = str(e.get("id", ""))
+                src = gk_map.get(pid)
+                if src:
+                    final_gk.append({"id": pid, "name": src.get("name"), "photo_path": src.get("photo_path")})
+                else:
+                    final_gk.append({"id": pid, "name": e.get("name") or pid, "photo_path": e.get("photo_path") or ""})
+
+            pack_dict["field_players"] = final_field
+            pack_dict["gk_players"] = final_gk
+
+        packs.append(pack_dict)
 
     last_win = request.session.pop("last_win", None)
     return render(request, "accounts/packs_list.html", {"packs": packs, "user": user, "last_win": last_win})
+
+@require_POST
+@transaction.atomic
+def buy_pack_view(request, pack_id):
+    """
+    Compra de pack via POST em /packs/<pack_id>/buy/
+    - seleciona entry aleatória a partir do JSON do Pack (pick_random_entry)
+    - encontra o jogador no DB pelo id e tipo (field|gk)
+    - cria/incrementa InventoryItem (generic FK)
+    - debita coins do usuário
+    - salva last_win na session e redirect para /packs/#result
+    """
+    user = _get_current_user(request)
+    if not user:
+        return redirect("/login/")
+
+    # debug: ver o pack_id recebido
+    try:
+        logger.debug("DBGBUY: received pack_id repr: %r type: %s", pack_id, type(pack_id))
+        print("DBGBUY: received pack_id repr:", repr(pack_id), "type:", type(pack_id))
+    except Exception:
+        pass
+
+    # tentar carregar pack diretamente (aceita uuid ou str)
+    pack = None
+    try:
+        pack = get_object_or_404(Pack, pk=pack_id)
+    except Exception as exc:
+        logger.debug("DBGBUY: get_object_or_404 failed: %s", exc)
+        print("DBGBUY: get_object_or_404 failed:", exc)
+        # fallback: comparar string dos ids (útil se houver diferença de tipo)
+        for ex in Pack.objects.values_list("id", flat=True)[:500]:
+            try:
+                if str(ex) == str(pack_id):
+                    pack = Pack.objects.filter(pk=ex).first()
+                    if pack:
+                        logger.debug("DBGBUY: fallback matched pack id: %r", ex)
+                        print("DBGBUY: fallback matched pack id:", ex)
+                        break
+            except Exception:
+                continue
+
+    if pack is None:
+        messages.error(request, "Pack não encontrado (buy endpoint).")
+        return redirect("/packs/")
+
+    # lock do usuário para evitar double-spend
+    user = SistemasUser.objects.select_for_update().get(pk=user.pk)
+
+    if getattr(user, "coins", 0) < pack.price:
+        messages.error(request, "Moedas insuficientes.")
+        return redirect("/packs/")
+
+    # sorteio ponderado a partir do JSON do pack
+    try:
+        chosen = pack.pick_random_entry()
+    except Exception as e:
+        logger.exception("DBGBUY: error picking entry: %s", e)
+        chosen = None
+
+    if not chosen:
+        messages.error(request, "Pack vazio ou sem entradas ponderadas.")
+        return redirect("/packs/")
+
+    # chosen: dict com "id", "type" ("field" | "gk"), possivelmente outros campos
+    player_id = str(chosen.get("id"))
+    player_type = chosen.get("type")
+
+    if player_type == "field":
+        model = JogadorCampo
+        p_type = "field"
+    elif player_type == "gk":
+        model = JogadorGoleiro
+        p_type = "gk"
+    else:
+        messages.error(request, "Entrada inválida no pack.")
+        return redirect("/packs/")
+
+    # buscar jogador atual no DB (preferível aos dados embutidos)
+    player_obj = model.objects.filter(pk=player_id).first()
+    # se não existir no DB, ainda aceitamos a entry (pode ter sido migrada como snapshot)
+    if player_obj is None:
+        # tenta encontrar por string id comparando com os registros (fallback)
+        for ex in model.objects.values_list("id", flat=True)[:1000]:
+            if str(ex) == player_id:
+                player_obj = model.objects.filter(pk=ex).first()
+                break
+
+    # criar/incrementar InventoryItem (usa ContentType)
+    ct = ContentType.objects.get_for_model(model)
+    inv, created = InventoryItem.objects.get_or_create(
+        user=user,
+        content_type=ct,
+        object_id=player_id,
+        defaults={"qty": 1}
+    )
+    if not created:
+        inv.qty = inv.qty + 1
+        inv.save()
+
+    # debitar coins e salvar
+    user.coins = user.coins - pack.price
+    user.save()
+
+    # preparar dados para modal (prefere dados atuais do DB, senão pega do chosen)
+    photo_path = chosen.get("photo_path") or (getattr(player_obj, "photo_path", None) if player_obj else "")
+    player_name = chosen.get("name") or (getattr(player_obj, "name", None) if player_obj else player_id)
+    overall = chosen.get("overall") or (getattr(player_obj, "overall", "") if player_obj else "")
+
+    request.session["last_win"] = {
+        "id": player_id,
+        "name": player_name or player_id,
+        "type": p_type,
+        "photo_path": photo_path or "",
+        "overall": overall,
+        "pack_name": pack.name,
+    }
+
+    return redirect("/packs/#result")

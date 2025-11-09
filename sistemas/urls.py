@@ -22,4 +22,5 @@ urlpatterns = [
 
     #packs
     path("packs/", views.packs_list_view, name="packs_list"),
+    path('packs/<uuid:pack_id>/buy/', views.buy_pack_view, name='buy_pack'),
 ]
