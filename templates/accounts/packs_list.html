@@ -33,13 +33,12 @@
           <p>Preço: <strong>{{ p.obj.price }}</strong> moedas</p>
 
           <p>
-            <!-- alvo do modal: #pack-<id> -->
             <a class="btn" href="#pack-{{ p.obj.id }}">Ver pack</a>
           </p>
         </div>
 
         <!-- modal CSS-only -->
-        <div id="pack-{{ p.obj.id }}" class="pack-modal">
+        <div id="pack-{{ p.obj.id }}" class="pack-modal" aria-hidden="true">
           <div class="pack-modal-backdrop"></div>
           <div class="pack-modal-content">
             <a href="#" class="modal-close" title="Fechar">×</a>
@@ -67,11 +66,11 @@
               </div>
 
               <div class="pack-modal-cards">
-                {% if p.entries %}
+                {% if p.entries and p.entries|length > 0 %}
                   {% for e in p.entries %}
                     <div class="player-card-small-modal">
                       {% if e.player and e.player.photo %}
-                        <img src="{% static e.player.photo %}" alt="player" />
+                        <img src="{% static e.player.photo %}" alt="" />
                       {% else %}
                         <img src="{% static 'webmedia/packs/generico.png' %}" alt="sem foto" />
                       {% endif %}
@@ -89,6 +88,7 @@
             </div>
           </div>
         </div>
+
         {% endfor %}
       </div>
     </div>
