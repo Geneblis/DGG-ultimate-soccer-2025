@@ -289,113 +289,127 @@ def packs_list_view(request):
 @transaction.atomic
 def buy_pack_view(request, pack_id):
     """
-    Compra de pack via POST em /packs/<pack_id>/buy/
-    - seleciona entry aleatória a partir do JSON do Pack (pick_random_entry)
-    - encontra o jogador no DB pelo id e tipo (field|gk)
-    - cria/incrementa InventoryItem (generic FK)
-    - debita coins do usuário
-    - salva last_win na session e redirect para /packs/#result
+    Compra de pack via POST /packs/<pack_id>/buy/
+    Versão robusta: busca o pack comparando str(p.id) contra pack_id recebido.
     """
     user = _get_current_user(request)
     if not user:
         return redirect("/login/")
 
-    # debug: ver o pack_id recebido
+    # debug
     try:
-        logger.debug("DBGBUY: received pack_id repr: %r type: %s", pack_id, type(pack_id))
-        print("DBGBUY: received pack_id repr:", repr(pack_id), "type:", type(pack_id))
+        print("DBGBUY: attempt buy, raw pack_id:", repr(pack_id), "type:", type(pack_id))
     except Exception:
         pass
 
-    # tentar carregar pack diretamente (aceita uuid ou str)
-    pack = None
-    try:
-        pack = get_object_or_404(Pack, pk=pack_id)
-    except Exception as exc:
-        logger.debug("DBGBUY: get_object_or_404 failed: %s", exc)
-        print("DBGBUY: get_object_or_404 failed:", exc)
-        # fallback: comparar string dos ids (útil se houver diferença de tipo)
-        for ex in Pack.objects.values_list("id", flat=True)[:500]:
+    pid_str = str(pack_id)
+
+    # 1) tentativa rápida por igualdade (strings)
+    pack = Pack.objects.filter(id=pid_str).first()
+    if pack:
+        print("DBGBUY: found pack by direct filter(id=pid_str) ->", str(pack.id))
+    else:
+        # 2) tentativa sem hífens
+        pid_nodash = pid_str.replace("-", "")
+        pack = Pack.objects.filter(id__in=[pid_str, pid_nodash]).first()
+        if pack:
+            print("DBGBUY: found pack by id__in fallback ->", str(pack.id))
+
+    # 3) fallback robusto: iterar todos os packs e comparar str(p.id)
+    if not pack:
+        print("DBGBUY: direct filters failed, iterating all packs to match string...")
+        for p in Pack.objects.all():
             try:
-                if str(ex) == str(pack_id):
-                    pack = Pack.objects.filter(pk=ex).first()
-                    if pack:
-                        logger.debug("DBGBUY: fallback matched pack id: %r", ex)
-                        print("DBGBUY: fallback matched pack id:", ex)
-                        break
+                if str(p.id) == pid_str or str(p.id).replace("-", "") == pid_str.replace("-", ""):
+                    pack = p
+                    print("DBGBUY: matched by iterating Pack.objects.all():", str(p.id))
+                    break
             except Exception:
                 continue
 
-    if pack is None:
+    if not pack:
+        # show a sample to help debugging
+        sample = list(Pack.objects.values_list("id", flat=True)[:20])
+        print("DBGBUY: pack NOT FOUND. pid_str:", pid_str)
+        print("DBGBUY: sample existing pack ids (first 20):")
+        for ex in sample:
+            print("  -", repr(ex), " type:", type(ex), " str:", str(ex))
         messages.error(request, "Pack não encontrado (buy endpoint).")
         return redirect("/packs/")
 
-    # lock do usuário para evitar double-spend
+    # Sucesso: temos pack
+    print("DBGBUY: using pack:", str(pack.id), pack.name)
+
+    # lock do usuário
     user = SistemasUser.objects.select_for_update().get(pk=user.pk)
 
     if getattr(user, "coins", 0) < pack.price:
         messages.error(request, "Moedas insuficientes.")
+        print("DBGBUY: insufficient coins:", user.coins, "price:", pack.price)
         return redirect("/packs/")
 
-    # sorteio ponderado a partir do JSON do pack
+    # pick an entry from pack JSON
     try:
         chosen = pack.pick_random_entry()
     except Exception as e:
-        logger.exception("DBGBUY: error picking entry: %s", e)
+        print("DBGBUY: pick_random_entry error:", e)
         chosen = None
 
     if not chosen:
         messages.error(request, "Pack vazio ou sem entradas ponderadas.")
+        print("DBGBUY: no chosen entry.")
         return redirect("/packs/")
 
-    # chosen: dict com "id", "type" ("field" | "gk"), possivelmente outros campos
-    player_id = str(chosen.get("id"))
-    player_type = chosen.get("type")
+    chosen_id = str(chosen.get("id"))
+    chosen_type = chosen.get("type")
+    print("DBGBUY: chosen entry:", chosen)
 
-    if player_type == "field":
-        model = JogadorCampo
+    if chosen_type == "field":
+        player_model = JogadorCampo
         p_type = "field"
-    elif player_type == "gk":
-        model = JogadorGoleiro
+    elif chosen_type == "gk":
+        player_model = JogadorGoleiro
         p_type = "gk"
     else:
         messages.error(request, "Entrada inválida no pack.")
+        print("DBGBUY: invalid chosen_type:", chosen_type)
         return redirect("/packs/")
 
-    # buscar jogador atual no DB (preferível aos dados embutidos)
-    player_obj = model.objects.filter(pk=player_id).first()
-    # se não existir no DB, ainda aceitamos a entry (pode ter sido migrada como snapshot)
-    if player_obj is None:
-        # tenta encontrar por string id comparando com os registros (fallback)
-        for ex in model.objects.values_list("id", flat=True)[:1000]:
-            if str(ex) == player_id:
-                player_obj = model.objects.filter(pk=ex).first()
-                break
+    # buscar jogador no DB (tolerante)
+    player_obj = player_model.objects.filter(id=chosen_id).first()
+    if not player_obj:
+        for ex in player_model.objects.values_list("id", flat=True)[:2000]:
+            try:
+                if str(ex) == chosen_id or str(ex).replace("-", "") == chosen_id.replace("-", ""):
+                    player_obj = player_model.objects.filter(pk=ex).first()
+                    if player_obj:
+                        print("DBGBUY: matched player by fallback id:", ex)
+                        break
+            except Exception:
+                continue
 
-    # criar/incrementar InventoryItem (usa ContentType)
-    ct = ContentType.objects.get_for_model(model)
+    # criar/incrementar inventário
+    ct = ContentType.objects.get_for_model(player_model)
     inv, created = InventoryItem.objects.get_or_create(
-        user=user,
-        content_type=ct,
-        object_id=player_id,
-        defaults={"qty": 1}
+        user=user, content_type=ct, object_id=chosen_id, defaults={"qty": 1}
     )
     if not created:
-        inv.qty = inv.qty + 1
+        inv.qty += 1
         inv.save()
 
-    # debitar coins e salvar
-    user.coins = user.coins - pack.price
+    # debitar coins
+    user.coins -= pack.price
     user.save()
+    print("DBGBUY: purchase completed. new coins:", user.coins)
 
-    # preparar dados para modal (prefere dados atuais do DB, senão pega do chosen)
-    photo_path = chosen.get("photo_path") or (getattr(player_obj, "photo_path", None) if player_obj else "")
-    player_name = chosen.get("name") or (getattr(player_obj, "name", None) if player_obj else player_id)
+    # preparar last_win
+    photo_path = chosen.get("photo_path") or (getattr(player_obj, "photo_path", "") if player_obj else "")
+    player_name = chosen.get("name") or (getattr(player_obj, "name", "") if player_obj else chosen_id)
     overall = chosen.get("overall") or (getattr(player_obj, "overall", "") if player_obj else "")
 
     request.session["last_win"] = {
-        "id": player_id,
-        "name": player_name or player_id,
+        "id": chosen_id,
+        "name": player_name or chosen_id,
         "type": p_type,
         "photo_path": photo_path or "",
         "overall": overall,
@@ -403,3 +417,4 @@ def buy_pack_view(request, pack_id):
     }
 
     return redirect("/packs/#result")
+
