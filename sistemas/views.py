@@ -4,16 +4,33 @@ import json
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib import messages
 from django.db import transaction
-from django.http import HttpResponseRedirect
+from django.http import JsonResponse, HttpResponseForbidden, HttpResponseBadRequest
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils.text import slugify
-
+from django.views.decorators.http import require_POST
 from .models import (
     SistemasUser, JogadorCampo, JogadorGoleiro,
     InventoryItem, Pack, PackEntry
 )
-from .utils import add_player_to_user_inventory
+
+# colocar no topo do arquivo, se ainda não tiver
+import uuid
+import unicodedata
+
+# ... outros imports já existentes ...
+from django.shortcuts import render, redirect
+from django.db import transaction
+from django.contrib import messages
+from django.views.decorators.http import require_http_methods
+from django.contrib.contenttypes.models import ContentType
+
+import uuid
+import unicodedata
+from django.db import connection
+
+from .models import Pack, PackEntry, JogadorCampo, JogadorGoleiro, InventoryItem, SistemasUser
+
 
 
 def _static_path_for_club_logo(player):
@@ -170,6 +187,8 @@ def missoes_view(request):
     return render(request, "accounts/missions.html", {"user": user, "missoes": missoes})
 
 def store_players_view(request):
+    #use de exemplo para listar jogadores disponiveis no pack:
+
     user = _get_current_user(request)
     if not user:
         return redirect("login")
@@ -187,171 +206,134 @@ def store_players_view(request):
         "goalkeepers": goalkeepers,
     })
 
-def get_players_for_pack(pack):
-    """
-    Recebe uma instância Pack (ou id string/UUID) e devolve lista de dicts:
-      [{ 'entry': <PackEntry>, 'player': <JogadorCampo|JogadorGoleiro|None>,
-         'player_type': 'field'|'gk', 'player_id': '<uuid str>', 'photo': '<path>' }, ...]
-    Busca os jogadores em batch para evitar N queries.
-    """
-    # aceita pack instância ou id
-    if not isinstance(pack, Pack):
-        pack = Pack.objects.filter(pk=pack).first()
-        if not pack:
-            return []
-
-    entries_qs = list(pack.entries.all().order_by("-weight", "id"))
-    # coletar ids por tipo para buscas em lote
-    field_ids = [str(e.player_id) for e in entries_qs if e.player_type == "field"]
-    gk_ids = [str(e.player_id) for e in entries_qs if e.player_type == "gk"]
-
-    campos_map = {}
-    if field_ids:
-        qs = JogadorCampo.objects.filter(id__in=field_ids)
-        campos_map = {str(x.id): x for x in qs}
-
-    gks_map = {}
-    if gk_ids:
-        qs = JogadorGoleiro.objects.filter(id__in=gk_ids)
-        gks_map = {str(x.id): x for x in qs}
-
-    results = []
-    for e in entries_qs:
-        pid = str(e.player_id)
-        player_obj = None
-        if e.player_type == "field":
-            player_obj = campos_map.get(pid)
-        else:
-            player_obj = gks_map.get(pid)
-
-        photo = ""
-        if player_obj is not None:
-            photo = getattr(player_obj, "photo_path", "") or getattr(player_obj, "photo", "") or ""
-
-        results.append({
-            "entry": e,
-            "player": player_obj,
-            "player_type": e.player_type,
-            "player_id": pid,
-            "photo": photo,
-        })
-    return results
-
+@require_http_methods(["GET", "POST"])
 @transaction.atomic
 def packs_list_view(request):
-    """
-    Lista packs + mostra modal com players (cross-reference em PackEntry).
-    POST (form) com action=open + pack_id -> abre pack (debita moedas e adiciona InventoryItem).
-    """
-    uid = request.session.get("user_id")
-    user = None
-    if uid:
-        try:
-            user = SistemasUser.objects.get(pk=uid)
-        except SistemasUser.DoesNotExist:
-            user = None
+    user = _get_current_user(request)
+    if not user:
+        return redirect("/login/")
 
-    # tratar POST do formulário de abrir pack
     if request.method == "POST":
-        action = request.POST.get("action")
-        if action == "open":
-            pack_id = request.POST.get("pack_id")
-            if not pack_id:
-                messages.error(request, "Pack inválido.")
-                return redirect("packs_list")
-            if not user:
-                messages.error(request, "Faça login para abrir packs.")
-                return redirect("login")
+        raw = request.POST.get("pack_id")
+        if raw is None:
+            messages.error(request, "Pack inválido (id ausente).")
+            return redirect("/packs/")
 
-            pack = get_object_or_404(Pack, pk=pack_id)
+        # normalizar e sanitizar input
+        normalized = unicodedata.normalize("NFKC", str(raw))
+        sanitized = normalized.strip().strip("'\"")
+        for z in ["\u200b", "\u200c", "\u200d", "\ufeff", "\u200e", "\u200f"]:
+            sanitized = sanitized.replace(z, "")
+        sanitized = sanitized.strip()
 
-            if user.coins < pack.price:
-                messages.error(request, "Moedas insuficientes.")
-                return redirect("packs_list")
+        # tentar converter pra UUID canônico
+        uuid_obj = None
+        try:
+            uuid_obj = uuid.UUID(sanitized)
+            sanitized = str(uuid_obj)
+        except Exception:
+            uuid_obj = None
 
-            # pegar entries por foreign key pack_id (mais robusto)
-            entries_qs = PackEntry.objects.filter(pack_id=pack.id).order_by("-weight")
-            entries = list(entries_qs)
-            if not entries:
-                messages.error(request, "Pack vazio. Contate o administrador.")
-                return redirect("packs_list")
+        # tentativa direta pelo ORM
+        pack = None
+        if uuid_obj is not None:
+            pack = Pack.objects.filter(pk=uuid_obj).first()
+        if pack is None:
+            pack = Pack.objects.filter(pk=sanitized).first()
 
-            weights = [max(1, int(getattr(e, "weight", 1) or 1)) for e in entries]
-            chosen = random.choices(entries, weights=weights, k=1)[0]
-
-            # debitar
-            user.coins -= pack.price
-            user.save()
-
-            # tentar adicionar ao inventário (usa util add_player_to_user_inventory se existir)
-            item = None
-            try:
-                item, created = add_player_to_user_inventory(user, chosen.player_type, chosen.player_id, amount=1)
-            except Exception:
-                # fallback com ContentType + InventoryItem
+        # fallback robusto: comparar str(ex) com sanitized e depois buscar com o UUID existente
+        if pack is None:
+            for ex in Pack.objects.values_list("id", flat=True)[:200]:
                 try:
-                    from django.contrib.contenttypes.models import ContentType
-                    ct = ContentType.objects.get_for_model(JogadorCampo) if chosen.player_type == "field" else ContentType.objects.get_for_model(JogadorGoleiro)
-                    inv, created = InventoryItem.objects.get_or_create(
-                        user=user, content_type=ct, object_id=str(chosen.player_id),
-                        defaults={"qty": 1}
-                    )
-                    if not created:
-                        inv.qty += 1
-                        inv.save()
-                    item = inv
+                    if str(ex) == sanitized:
+                        pack = Pack.objects.filter(pk=ex).first()
+                        if pack:
+                            break
                 except Exception:
-                    # reembolsa e avisa
-                    user.coins += pack.price
-                    user.save()
-                    messages.error(request, "Erro interno ao adicionar ao inventário. Tente novamente.")
-                    return redirect("packs_list")
+                    continue
 
-            # pegar nome do jogador sorteado para mensagem
-            pdata = (JogadorCampo.objects.filter(pk=chosen.player_id).first()
-                     if chosen.player_type == "field"
-                     else JogadorGoleiro.objects.filter(pk=chosen.player_id).first())
-            player_name = pdata.name if pdata else "Jogador"
+        if pack is None:
+            messages.error(request, "Pack não encontrado. Recarregue a página ou verifique o template.")
+            return redirect("/packs/")
 
-            messages.success(request, f"Você abriu '{pack.name}' e obteve: {player_name} — custo: {pack.price} moedas. Moedas atuais: {user.coins}")
-            return redirect("packs_list")
+        # lock do usuário
+        user = SistemasUser.objects.select_for_update().get(pk=user.pk)
+        if getattr(user, "coins", 0) < pack.price:
+            messages.error(request, "Moedas insuficientes.")
+            return redirect("/packs/")
+
+        entries = list(PackEntry.objects.filter(pack=pack).select_related("player_field", "player_gk"))
+        if not entries:
+            messages.error(request, "Pack vazio.")
+            return redirect("/packs/")
+
+        # construir ponderação
+        weighted = []
+        tot = 0
+        for e in entries:
+            w = max(0, int(e.weight or 0))
+            if w <= 0:
+                continue
+            tot += w
+            weighted.append((e, tot))
+        if tot == 0:
+            messages.error(request, "Pack sem entradas ponderadas.")
+            return redirect("/packs/")
+
+        r = random.randint(1, tot)
+        chosen = None
+        for e, cum in weighted:
+            if r <= cum:
+                chosen = e
+                break
+        if chosen is None:
+            messages.error(request, "Erro ao selecionar jogador.")
+            return redirect("/packs/")
+
+        if chosen.player_field_id:
+            player_obj = chosen.player_field
+            ct = ContentType.objects.get_for_model(JogadorCampo)
+            p_type = "field"
+        elif chosen.player_gk_id:
+            player_obj = chosen.player_gk
+            ct = ContentType.objects.get_for_model(JogadorGoleiro)
+            p_type = "gk"
         else:
-            messages.error(request, "Ação inválida.")
-            return redirect("packs_list")
+            messages.error(request, "Entrada inválida.")
+            return redirect("/packs/")
 
-    # GET: montar lista de packs com entries -> cada entry traz o objeto do jogador (se existir)
-    packs_qs = Pack.objects.all().order_by("price")
+        obj_id = str(player_obj.id)
+        inv, created = InventoryItem.objects.get_or_create(
+            user=user, content_type=ct, object_id=obj_id, defaults={"qty": 1}
+        )
+        if not created:
+            inv.qty = inv.qty + 1
+            inv.save()
+
+        user.coins = user.coins - pack.price
+        user.save()
+
+        request.session["last_win"] = {
+            "id": obj_id,
+            "name": player_obj.name,
+            "type": p_type,
+            "photo_path": player_obj.photo_path,
+            "overall": getattr(player_obj, "overall", 0),
+            "pack_name": pack.name,
+        }
+        return redirect("/packs/#result")
+
+    # GET: listar packs (sem revelar entries)
+    packs_qs = Pack.objects.all().order_by("-created_at")
     packs = []
     for p in packs_qs:
-        entries = []
-        # buscar PackEntry por pack_id (mais robusto que p.entries, mas ambos funcionam)
-        for e in PackEntry.objects.filter(pack_id=p.id).order_by("-weight"):
-            if e.player_type == "field":
-                pdata = JogadorCampo.objects.filter(pk=e.player_id).first()
-            else:
-                pdata = JogadorGoleiro.objects.filter(pk=e.player_id).first()
-
-            player_obj = None
-            if pdata:
-                player_obj = {
-                    "id": str(pdata.id),
-                    "name": pdata.name,
-                    "photo": getattr(pdata, "photo_path", "") or getattr(pdata, "photo", "") or ""
-                }
-
-            entries.append({
-                "entry_id": e.id,
-                "player_type": e.player_type,
-                "player_id": str(e.player_id),
-                "player": player_obj,
-                "weight": e.weight,
-                "note": getattr(e, "note", ""),
-            })
-
         packs.append({
-            "obj": p,
-            "image_path": getattr(p, "image_path", "") or getattr(p, "image", "") or getattr(p, "path_image", "") or "",
-            "entries": entries,
+            "id": str(p.id),
+            "name": p.name,
+            "price": p.price,
+            "description": p.description,
+            "image_path": p.image_path,
         })
 
-    return render(request, "accounts/packs_list.html", {"packs": packs, "user": user})
+    last_win = request.session.pop("last_win", None)
+    return render(request, "accounts/packs_list.html", {"packs": packs, "user": user, "last_win": last_win})

@@ -178,15 +178,28 @@ class Pack(models.Model):
         return f"{self.name} — {self.price} coins"
 
 class PackEntry(models.Model):
-    PLAYER_TYPE_CHOICES = [("field", "FieldPlayer"), ("gk", "Goalkeeper")]
     id = models.AutoField(primary_key=True)
     pack = models.ForeignKey(Pack, on_delete=models.CASCADE, related_name="entries")
-    player_type = models.CharField(max_length=8, choices=PLAYER_TYPE_CHOICES)
-    player_id = models.UUIDField()   # <- usa UUIDField ao invés de CharField
+    # duas FKs opcionais — apenas uma deve ser preenchida por entry
+    player_field = models.ForeignKey(JogadorCampo, null=True, blank=True, on_delete=models.CASCADE)
+    player_gk = models.ForeignKey(JogadorGoleiro, null=True, blank=True, on_delete=models.CASCADE)
+
     weight = models.IntegerField(default=1)
     note = models.CharField(max_length=200, blank=True)
 
     class Meta:
         db_table = "sistemas_packentry"
-        unique_together = (("pack", "player_type", "player_id"),)
+        unique_together = (("pack", "player_field"), ("pack", "player_gk"))
         ordering = ["-weight"]
+
+    def get_player(self):
+        """Retorna (obj, 'field'|'gk'|None)."""
+        if self.player_field_id:
+            return (self.player_field, "field")
+        if self.player_gk_id:
+            return (self.player_gk, "gk")
+        return (None, None)
+
+    def __str__(self):
+        p, t = self.get_player()
+        return f"{self.pack.name} - {p.name if p else '???'} ({t})"
