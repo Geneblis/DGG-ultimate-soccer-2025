@@ -9,7 +9,10 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils.text import slugify
 
-from .models import SistemasUser, JogadorCampo, JogadorGoleiro, InventoryItem, Pack, PackEntry, SistemasUser, JogadorCampo, JogadorGoleiro
+from .models import (
+    SistemasUser, JogadorCampo, JogadorGoleiro,
+    InventoryItem, Pack, PackEntry
+)
 from .utils import add_player_to_user_inventory
 
 
@@ -184,14 +187,62 @@ def store_players_view(request):
         "goalkeepers": goalkeepers,
     })
 
+def get_players_for_pack(pack):
+    """
+    Recebe uma instância Pack (ou id string/UUID) e devolve lista de dicts:
+      [{ 'entry': <PackEntry>, 'player': <JogadorCampo|JogadorGoleiro|None>,
+         'player_type': 'field'|'gk', 'player_id': '<uuid str>', 'photo': '<path>' }, ...]
+    Busca os jogadores em batch para evitar N queries.
+    """
+    # aceita pack instância ou id
+    if not isinstance(pack, Pack):
+        pack = Pack.objects.filter(pk=pack).first()
+        if not pack:
+            return []
+
+    entries_qs = list(pack.entries.all().order_by("-weight", "id"))
+    # coletar ids por tipo para buscas em lote
+    field_ids = [str(e.player_id) for e in entries_qs if e.player_type == "field"]
+    gk_ids = [str(e.player_id) for e in entries_qs if e.player_type == "gk"]
+
+    campos_map = {}
+    if field_ids:
+        qs = JogadorCampo.objects.filter(id__in=field_ids)
+        campos_map = {str(x.id): x for x in qs}
+
+    gks_map = {}
+    if gk_ids:
+        qs = JogadorGoleiro.objects.filter(id__in=gk_ids)
+        gks_map = {str(x.id): x for x in qs}
+
+    results = []
+    for e in entries_qs:
+        pid = str(e.player_id)
+        player_obj = None
+        if e.player_type == "field":
+            player_obj = campos_map.get(pid)
+        else:
+            player_obj = gks_map.get(pid)
+
+        photo = ""
+        if player_obj is not None:
+            photo = getattr(player_obj, "photo_path", "") or getattr(player_obj, "photo", "") or ""
+
+        results.append({
+            "entry": e,
+            "player": player_obj,
+            "player_type": e.player_type,
+            "player_id": pid,
+            "photo": photo,
+        })
+    return results
+
 @transaction.atomic
 def packs_list_view(request):
     """
-    GET -> renderiza lista de packs (template accounts/packs_list.html).
-    POST -> form 'action=open' + 'pack_id' -> tenta abrir o pack (debita moedas e adiciona ao inventário),
-            depois redireciona para a própria lista com mensagens.
+    GET -> renderiza lista de packs com entries (cada entry traz player.photo e player.name quando existir).
+    POST -> form (action=open + pack_id) -> abre pack (debita moedas, salva inventário) e redireciona.
     """
-    # --- usuário da sessão ---
     uid = request.session.get("user_id")
     user = None
     if uid:
@@ -200,7 +251,7 @@ def packs_list_view(request):
         except SistemasUser.DoesNotExist:
             user = None
 
-    # --- POST: abrir pack via form ---
+    # -- POST: abrir pack --
     if request.method == "POST":
         action = request.POST.get("action")
         if action == "open":
@@ -208,7 +259,6 @@ def packs_list_view(request):
             if not pack_id:
                 messages.error(request, "Pack inválido.")
                 return redirect("packs_list")
-
             if not user:
                 messages.error(request, "Faça login para abrir packs.")
                 return redirect("login")
@@ -224,20 +274,19 @@ def packs_list_view(request):
                 messages.error(request, "Pack vazio. Contate o administrador.")
                 return redirect("packs_list")
 
-            # escolha por weight (fallback 1)
             weights = [max(1, int(getattr(e, "weight", 1) or 1)) for e in entries]
             chosen = random.choices(entries, weights=weights, k=1)[0]
 
-            # debitar moedas (atomic)
+            # debita moedas
             user.coins -= pack.price
             user.save()
 
-            # tentar util add_player_to_user_inventory (caso você tenha)
+            # tenta usar sua utilidade existente, se não existir faz fallback com ContentType/InventoryItem
             item = None
             try:
+                # se você tiver add_player_to_user_inventory importada/util
                 item, created = add_player_to_user_inventory(user, chosen.player_type, chosen.player_id, amount=1)
             except Exception:
-                # fallback simples com ContentType + InventoryItem
                 try:
                     if chosen.player_type == "field":
                         ct = ContentType.objects.get_for_model(JogadorCampo)
@@ -254,56 +303,60 @@ def packs_list_view(request):
                         inv.save()
                     item = inv
                 except Exception:
-                    # reembolsa e mostra erro
+                    # reembolsa e retorna erro
                     user.coins += pack.price
                     user.save()
                     messages.error(request, "Erro interno ao adicionar ao inventário. Tente novamente.")
                     return redirect("packs_list")
 
-            # obter dados do jogador sorteado para exibir na mensagem
+            # buscar dados do jogador sorteado para a mensagem
             if chosen.player_type == "field":
                 pdata = JogadorCampo.objects.filter(pk=chosen.player_id).first()
             else:
                 pdata = JogadorGoleiro.objects.filter(pk=chosen.player_id).first()
 
-            player_name = pdata.name if pdata else None
-
-            messages.success(request, f"Você abriu '{pack.name}' e obteve: {player_name or 'um jogador'} — custo: {pack.price} moedas. Moedas atuais: {user.coins}")
-            # redireciona para evitar repost
+            player_name = pdata.name if pdata else "Jogador"
+            messages.success(request, f"Você abriu '{pack.name}' e obteve: {player_name} — custo: {pack.price} moedas. Moedas atuais: {user.coins}")
             return redirect("packs_list")
         else:
             messages.error(request, "Ação inválida.")
             return redirect("packs_list")
 
-    # --- GET: preparar dados para template ---
+    # -- GET: montar dados dos packs (com players) --
     packs_qs = Pack.objects.all().order_by("price")
     packs = []
     for p in packs_qs:
-        # montar entries (só o necessário: id do jogador e photo_path) - template usará img
         entries = []
         for e in p.entries.all().order_by("-weight"):
-            pdata = None
+            # tenta buscar objeto jogador em cada entry
             if e.player_type == "field":
                 pdata = JogadorCampo.objects.filter(pk=e.player_id).first()
             else:
                 pdata = JogadorGoleiro.objects.filter(pk=e.player_id).first()
 
-            photo = ""
+            player_obj = None
             if pdata:
-                photo = getattr(pdata, "photo_path", "") or getattr(pdata, "photo", "") or ""
+                player_obj = {
+                    "id": str(pdata.id),
+                    "name": pdata.name,
+                    # normaliza caminhos de foto: photo_path ou photo
+                    "photo": getattr(pdata, "photo_path", "") or getattr(pdata, "photo", "") or ""
+                }
 
             entries.append({
                 "entry_id": e.id,
                 "player_type": e.player_type,
                 "player_id": str(e.player_id),
-                "photo": photo,
+                "player": player_obj,
+                "weight": e.weight,
+                "note": getattr(e, "note", ""),
             })
 
-        packs.append({
+        pack_dict = {
             "obj": p,
-            "entries": entries,
-            # normalize image path field name
             "image_path": getattr(p, "image_path", "") or getattr(p, "image", "") or getattr(p, "path_image", "") or "",
-        })
+            "entries": entries,
+        }
+        packs.append(pack_dict)
 
     return render(request, "accounts/packs_list.html", {"packs": packs, "user": user})
