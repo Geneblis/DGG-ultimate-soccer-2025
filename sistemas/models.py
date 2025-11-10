@@ -319,28 +319,59 @@ class Pack(models.Model):
         return changed
     
 class Team(models.Model):
-    ...
+    """
+    Time do usuário.
+    - user: dono do time (foreign key para SistemasUser)
+    - slots: JSON com os jogadores colocados (snapshots completos preferencialmente)
+    - updated_at: timestamp automático
+    """
+    user = models.OneToOneField("SistemasUser", on_delete=models.CASCADE, related_name="team")
+    slots = JSONField(default=dict, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "sistemas_team"
+
+    def __str__(self):
+        return f"Team of {self.user.username}"
+
+    def ensure_structure(self):
+        s = self.slots or {}
+        if "gk" not in s:
+            s["gk"] = ""                  # pode ser "" (vazio) ou dict (snapshot)
+        if "def" not in s:
+            s["def"] = ["", "", "", ""]   # 4 slots defesa
+        if "mid" not in s:
+            s["mid"] = ["", "", ""]       # 3 slots meio
+        if "off" not in s:
+            s["off"] = ["", "", ""]       # 3 slots ataque
+        # só reatribui se alterou
+        if s != self.slots:
+            self.slots = s
+
     def set_slot(self, slot_key, player_snapshot_or_id):
         """
-        Agora aceita:
-          - player_snapshot_or_id: dict (snapshot com campos) -> guarda este dicionário no slot
-          - ou id/UUID string -> tenta buscar snapshot no inventário/DB e guarda o snapshot
+        Salva snapshot (dict) do jogador no slot, ou aceita um id/UUID e tenta resolver
+        para snapshot (procura no inventário do usuário -> player_data, ou nas tabelas).
+        slot_key: 'gk' | 'def_0' | 'mid_1' | 'off_2'
+        player_snapshot_or_id: dict snapshot OU id string
         """
         self.ensure_structure()
-        # tentar obter snapshot
         snap = None
+
+        # se já vier dict, usa direto
         if isinstance(player_snapshot_or_id, dict):
             snap = player_snapshot_or_id
         else:
             pid = str(player_snapshot_or_id)
-            # procurar em InventoryItem deste user por object_id ou player_data.id
+            # busca InventoryItem do usuário com player_data ou object_id
             inv = InventoryItem.objects.filter(user=self.user).filter(
                 models.Q(object_id=pid) | models.Q(player_data__id=pid)
             ).first()
-            if inv:
-                snap = inv.get_player_snapshot()
+            if inv and getattr(inv, "player_data", None):
+                snap = dict(inv.player_data)
             else:
-                # fallback: tentar buscar direto no DB
+                # fallback - buscar nas tabelas principais
                 f = JogadorCampo.objects.filter(pk=pid).first()
                 if f:
                     snap = {
@@ -361,12 +392,16 @@ class Team(models.Model):
         if not snap:
             raise ValueError("Não foi possível obter snapshot do jogador para salvar no slot.")
 
-        # escrever no slot (guardar o dict)
+        # escreve no slot
         if slot_key == "gk":
             self.slots["gk"] = snap
         else:
             sec, idx = slot_key.split("_"); idx = int(idx)
+            # garante espaço na lista
+            while len(self.slots.get(sec, [])) <= idx:
+                self.slots[sec].append("")
             self.slots[sec][idx] = snap
+
         self.save(update_fields=["slots", "updated_at"])
 
     def clear_slot(self, slot_key):
@@ -375,6 +410,8 @@ class Team(models.Model):
             self.slots["gk"] = ""
         else:
             sec, idx = slot_key.split("_"); idx = int(idx)
-            self.slots[sec][idx] = ""
+            if sec in self.slots and idx < len(self.slots[sec]):
+                self.slots[sec][idx] = ""
         self.save(update_fields=["slots", "updated_at"])
+
 
