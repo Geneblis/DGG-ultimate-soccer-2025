@@ -68,6 +68,60 @@ def _get_current_user(request):
     except SistemasUser.DoesNotExist:
         return None
 
+
+def _normalize_position(pos):
+    """
+    Normaliza várias formas de posição para as constantes do modelo JogadorCampo.
+    Retorna uma das constantes JogadorCampo.POSITION_* ou None.
+    """
+    if not pos:
+        return None
+    p = str(pos).strip().lower()
+    offs = {"offensivezone","offensive","off","ata","ataque","ata_zone","ataquezone","ataque_zone","offensive_zone"}
+    neuts = {"neutralzone","neutral","mid","midfield","meio","medio","mid_zone","meiozone","neutral_zone"}
+    defs = {"defensivezone","defensive","def","defesa","zdef","def_zone","defensive_zone"}
+
+    # se já é a constante (em lowercase)
+    if p == JogadorCampo.POSITION_OFF.lower():
+        return JogadorCampo.POSITION_OFF
+    if p == JogadorCampo.POSITION_NEU.lower():
+        return JogadorCampo.POSITION_NEU
+    if p == JogadorCampo.POSITION_DEF.lower():
+        return JogadorCampo.POSITION_DEF
+
+    if p in offs:
+        return JogadorCampo.POSITION_OFF
+    if p in neuts:
+        return JogadorCampo.POSITION_NEU
+    if p in defs:
+        return JogadorCampo.POSITION_DEF
+
+    # heurística simples por substring
+    if "off" in p and "def" not in p:
+        return JogadorCampo.POSITION_OFF
+    if "def" in p:
+        return JogadorCampo.POSITION_DEF
+    if "mid" in p or "neu" in p or "meio" in p:
+        return JogadorCampo.POSITION_NEU
+
+    return None
+
+def _infer_position_from_snapshot(snapshot):
+    """
+    Heurística simples para inferir posição se snapshot vier sem 'position'.
+    Usa diferença entre ataque e defesa.
+    """
+    try:
+        atk = int(snapshot.get("attack") or 0)
+        df = int(snapshot.get("defense") or 0)
+        if atk >= df + 5:
+            return JogadorCampo.POSITION_OFF
+        if df >= atk + 5:
+            return JogadorCampo.POSITION_DEF
+    except Exception:
+        pass
+    return JogadorCampo.POSITION_NEU
+
 def register_view(request):
     if request.method == "POST":
         username = (request.POST.get("username") or "").strip()
@@ -94,7 +148,6 @@ def register_view(request):
                 request.session["user_id"] = str(new_user.id)
                 return redirect("home")
     return render(request, "accounts/register.html")
-
 
 def login_view(request):
     if request.method == "POST":
@@ -125,6 +178,7 @@ def home_view(request):
 ## TIME ##
 
 # ===== Helpers internos =====
+
 def _inv_item_match_by_pid(inv_item, pid):
     if not inv_item:
         return False
@@ -149,10 +203,19 @@ def _inv_item_match_by_pid(inv_item, pid):
     return False
 
 def _inv_item_snapshot(inv_item):
+    """Tenta retornar snapshot (dict) representando o jogador do InventoryItem."""
     try:
         pd = getattr(inv_item, "player_data", None)
         if isinstance(pd, dict) and pd:
-            return dict(pd)
+            # garantir position canônica se for jogador de campo
+            snap = dict(pd)
+            if snap.get("type") == "field":
+                pos = snap.get("position") or snap.get("pos")
+                pos_norm = _normalize_position(pos)
+                if not pos_norm:
+                    pos_norm = _infer_position_from_snapshot(snap)
+                snap["position"] = pos_norm
+            return snap
     except Exception:
         pass
 
@@ -160,11 +223,12 @@ def _inv_item_snapshot(inv_item):
         co = getattr(inv_item, "content_object", None)
         if co:
             if isinstance(co, JogadorCampo):
+                pos_norm = _normalize_position(getattr(co, "position", None)) or getattr(co, "position", None)
                 return {
                     "id": str(co.id), "type": "field", "name": co.name, "club": co.club,
                     "country": co.country, "photo_path": co.photo_path, "overall": co.overall,
                     "attack": co.attack, "passing": co.passing, "defense": co.defense,
-                    "speed": co.speed, "position": co.position,
+                    "speed": co.speed, "position": pos_norm,
                 }
             else:
                 return {
@@ -184,11 +248,12 @@ def _inv_item_snapshot(inv_item):
             p = model.objects.filter(pk=oid).first()
             if p:
                 if isinstance(p, JogadorCampo):
+                    pos_norm = _normalize_position(getattr(p, "position", None)) or getattr(p, "position", None)
                     return {
                         "id": str(p.id), "type": "field", "name": p.name, "club": p.club,
                         "country": p.country, "photo_path": p.photo_path, "overall": p.overall,
                         "attack": p.attack, "passing": p.passing, "defense": p.defense,
-                        "speed": p.speed, "position": p.position,
+                        "speed": p.speed, "position": pos_norm,
                     }
                 else:
                     return {
@@ -202,27 +267,25 @@ def _inv_item_snapshot(inv_item):
 
     return None
 
-#view da pagina de times:
+# ----------------------
+# Views
+# ----------------------
+
 @require_http_methods(["GET"])
 def my_team_view(request):
     """
     Mostra 'My Team' com slots resolvidos e lista de jogadores elegíveis
     quando ?select_slot=<slot_key> é passado.
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     user = _get_current_user(request)
     if not user:
         return redirect("/login/")
 
-    # --- garantir que recuperamos o Team correto (passar a instância user, nunca user_id) ---
     team, created = Team.objects.get_or_create(user=user)
-    # garantir estrutura mínima de slots
+    # garantir estrutura mínima
     try:
         team.ensure_structure()
     except Exception:
-        # fallback: garante campo slots com a estrutura esperada
         s = team.slots or {}
         if "gk" not in s:
             s["gk"] = ""
@@ -235,62 +298,13 @@ def my_team_view(request):
         team.slots = s
         team.save(update_fields=["slots"])
 
-    # --- buscar inventário do usuário ---
     inv_rows = list(InventoryItem.objects.filter(user=user).select_related("content_type"))
     inventory_players = []
     inv_map = {}
 
-    # helper: tenta extrair snapshot armazenado no InventoryItem
-    def _inv_item_snapshot(item):
-        # 1) se você tem um campo JSON com snapshot (ex: player_data), use-o
-        if hasattr(item, "player_data") and item.player_data:
-            return item.player_data
-        # 2) se o content_object resolve, constrói snapshot a partir do objeto DB
-        try:
-            obj = item.get_player()
-            if obj:
-                # normaliza campos comuns (gk x field)
-                base = {
-                    "id": str(getattr(obj, "id", "")),
-                    "name": getattr(obj, "name", ""),
-                    "club": getattr(obj, "club", ""),
-                    "country": getattr(obj, "country", ""),
-                    "photo_path": getattr(obj, "photo_path", ""),
-                    "overall": getattr(obj, "overall", 0),
-                }
-                if isinstance(obj, JogadorCampo):
-                    base.update({
-                        "type": "field",
-                        "position": getattr(obj, "position", ""),
-                        "attack": getattr(obj, "attack", 0),
-                        "passing": getattr(obj, "passing", 0),
-                        "defense": getattr(obj, "defense", 0),
-                        "speed": getattr(obj, "speed", 0),
-                    })
-                else:
-                    base.update({
-                        "type": "gk",
-                        "handling": getattr(obj, "handling", 0),
-                        "positioning": getattr(obj, "positioning", 0),
-                        "reflex": getattr(obj, "reflex", 0),
-                        "speed": getattr(obj, "speed", 0),
-                    })
-                return base
-        except Exception:
-            pass
-        # 3) se InventoryItem.object_id e content_type estão definidos, devolve mínimo
-        try:
-            if getattr(item, "object_id", None):
-                return {"id": str(item.object_id)}
-        except Exception:
-            pass
-        return None
-
-    # popular inventory_players e inv_map
     for it in inv_rows:
         snap = _inv_item_snapshot(it)
         if not snap:
-            # se nada, pula
             continue
         pid = str(snap.get("id") or it.object_id or "")
         snap_norm = dict(snap)
@@ -301,27 +315,37 @@ def my_team_view(request):
                 snap_norm["type"] = "gk"
             else:
                 snap_norm["type"] = "field"
+
+        # normaliza posição para jogadores de campo
+        if snap_norm.get("type") == "field":
+            pos_curr = snap_norm.get("position")
+            pos_norm = _normalize_position(pos_curr)
+            if not pos_norm:
+                pos_norm = _infer_position_from_snapshot(snap_norm)
+            snap_norm["position"] = pos_norm
+
         snap_norm["qty"] = int(getattr(it, "qty", 1) or 1)
         inventory_players.append(snap_norm)
         inv_map[pid] = snap_norm
 
-    # --- construir slots prontos para template ---
+    # montar slots prontos
     slots = {"gk": None, "def": [], "mid": [], "off": []}
 
     def _resolve_slot_value(val):
-        """Retorna (pid_string, player_snapshot_or_None)."""
         if not val:
             return ("", None)
         if isinstance(val, dict):
             pid = str(val.get("id") or "")
             snap = dict(val)
             snap["qty"] = inv_map.get(pid, {}).get("qty", 0)
+            # garantir posição canônica pra snapshot guardado no time
+            if snap.get("type") == "field":
+                p = snap.get("position")
+                snap["position"] = _normalize_position(p) or snap.get("position")
             return (pid, snap)
         pid = str(val)
-        # primeiro tenta inv_map (itens que usuário possui)
         if pid in inv_map:
             return (pid, inv_map[pid])
-        # senão busca nas tabelas principais (para mostrar ficha mesmo sem qty)
         pobj_gk = JogadorGoleiro.objects.filter(pk=pid).first()
         if pobj_gk:
             return (pid, {
@@ -332,41 +356,38 @@ def my_team_view(request):
             })
         pobj = JogadorCampo.objects.filter(pk=pid).first()
         if pobj:
+            pos_norm = _normalize_position(getattr(pobj, "position", None)) or getattr(pobj, "position", None)
             return (pid, {
                 "id": pid, "type": "field", "name": pobj.name, "club": pobj.club,
                 "country": pobj.country, "photo_path": pobj.photo_path, "overall": pobj.overall,
                 "attack": pobj.attack, "passing": pobj.passing, "defense": pobj.defense,
-                "speed": pobj.speed, "position": pobj.position, "qty": 0
+                "speed": pobj.speed, "position": pos_norm, "qty": 0
             })
         return (pid, None)
 
-    # GK
     raw_gk = (team.slots.get("gk") if getattr(team, "slots", None) else "") or ""
     pid, player_detail = _resolve_slot_value(raw_gk)
     slots["gk"] = {"key": "gk", "assigned": pid or "", "player": player_detail}
 
-    # DEF (4)
     def_list = (team.slots.get("def") if getattr(team, "slots", None) else []) or ["", "", "", ""]
     for i in range(4):
         v = def_list[i] if i < len(def_list) else ""
         pid, player_detail = _resolve_slot_value(v)
         slots["def"].append({"key": f"def_{i}", "assigned": pid or "", "player": player_detail})
 
-    # MID (3)
     mid_list = (team.slots.get("mid") if getattr(team, "slots", None) else []) or ["", "", ""]
     for i in range(3):
         v = mid_list[i] if i < len(mid_list) else ""
         pid, player_detail = _resolve_slot_value(v)
         slots["mid"].append({"key": f"mid_{i}", "assigned": pid or "", "player": player_detail})
 
-    # OFF (3)
     off_list = (team.slots.get("off") if getattr(team, "slots", None) else []) or ["", "", ""]
     for i in range(3):
         v = off_list[i] if i < len(off_list) else ""
         pid, player_detail = _resolve_slot_value(v)
         slots["off"].append({"key": f"off_{i}", "assigned": pid or "", "player": player_detail})
 
-    # --- filtrar elegíveis para slot selecionado ---
+    # eligíveis
     selected_slot = request.GET.get("select_slot")
     eligible_players = []
     if selected_slot:
@@ -381,7 +402,6 @@ def my_team_view(request):
             elif sec == "off":
                 eligible_players = [p for p in inventory_players if p.get("type") == "field" and p.get("position") == JogadorCampo.POSITION_OFF and p.get("qty", 0) > 0]
 
-    # debug opcional (comente depois)
     logger.debug("my_team_view: user=%s inventory_count=%d team_slots=%s selected_slot=%s eligible=%d",
                  user.username, len(inventory_players), team.slots, selected_slot, len(eligible_players))
 
@@ -395,8 +415,6 @@ def my_team_view(request):
         "selected_slot": selected_slot,
         "eligible_players": eligible_players,
     })
-
-
 
 @require_POST
 @transaction.atomic
@@ -447,17 +465,19 @@ def set_team_slot_view(request):
         if p_type != "field":
             messages.error(request, "Apenas jogadores de campo podem ser colocados neste slot.")
             return redirect("my_team")
-        pos = snapshot.get("position")
-        if sec == "def" and pos != JogadorCampo.POSITION_DEF:
+        # normalizar posição antes da checagem
+        pos_norm = _normalize_position(snapshot.get("position")) or snapshot.get("position")
+        if sec == "def" and pos_norm != JogadorCampo.POSITION_DEF:
             messages.error(request, "Jogador não tem posição de defesa.")
             return redirect("my_team")
-        if sec == "mid" and pos != JogadorCampo.POSITION_NEU:
+        if sec == "mid" and pos_norm != JogadorCampo.POSITION_NEU:
             messages.error(request, "Jogador não tem posição de meio-campo.")
             return redirect("my_team")
-        if sec == "off" and pos != JogadorCampo.POSITION_OFF:
+        if sec == "off" and pos_norm != JogadorCampo.POSITION_OFF:
             messages.error(request, "Jogador não tem posição de ataque.")
             return redirect("my_team")
 
+    # recuperar valor antigo do slot
     old_val = ""
     if slot_key == "gk":
         old_val = team.slots.get("gk") if getattr(team, "slots", None) else ""
@@ -478,6 +498,7 @@ def set_team_slot_view(request):
         messages.info(request, "Jogador já está neste slot.")
         return redirect("my_team")
 
+    # devolver qty do antigo (se houver)
     if old_pid:
         found_old = None
         for it in inv_items:
@@ -498,12 +519,14 @@ def set_team_slot_view(request):
                     except Exception:
                         pass
 
+    # decrementar qty do novo
     inv_new.qty = (inv_new.qty or 1) - 1
     if inv_new.qty <= 0:
         inv_new.delete()
     else:
         inv_new.save()
 
+    # salvar no team (usando snapshot para persistir objeto no slots)
     try:
         if hasattr(team, "set_slot"):
             team.set_slot(slot_key, snapshot)
@@ -524,6 +547,7 @@ def set_team_slot_view(request):
 
     messages.success(request, "Jogador colocado no slot.")
     return redirect("my_team")
+
 
 
 @require_POST
@@ -606,7 +630,6 @@ def clear_team_slot_view(request):
 
     messages.success(request, "Slot liberado e inventário atualizado.")
     return redirect("my_team")
-
 
 def store_view(request):
     user = _get_current_user(request)
