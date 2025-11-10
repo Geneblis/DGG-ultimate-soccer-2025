@@ -23,7 +23,7 @@ from django.contrib.contenttypes.models import ContentType
 # ===== Local Models =====
 from .models import (
     SistemasUser, JogadorCampo, JogadorGoleiro,
-    InventoryItem, Pack, Team
+    InventoryItem, Pack, Team, AITeam, Match
 )
 
 
@@ -446,35 +446,35 @@ def set_team_slot_view(request):
             break
 
     if not inv_new:
-        messages.error(request, "Você não possui esse jogador no inventário.")
+        #messages.error(request, "Você não possui esse jogador no inventário.")
         return redirect("my_team")
 
     snapshot = _inv_item_snapshot(inv_new)
     if not snapshot:
-        messages.error(request, "Não foi possível obter os dados do jogador.")
+        #messages.error(request, "Não foi possível obter os dados do jogador.")
         return redirect("my_team")
 
     p_type = snapshot.get("type") or ("gk" if any(k in snapshot for k in ("handling","reflex")) else "field")
 
     if slot_key == "gk":
         if p_type != "gk":
-            messages.error(request, "Somente goleiros podem ser colocados neste slot.")
+            #messages.error(request, "Somente goleiros podem ser colocados neste slot.")
             return redirect("my_team")
     else:
         sec = slot_key.split("_")[0]
         if p_type != "field":
-            messages.error(request, "Apenas jogadores de campo podem ser colocados neste slot.")
+            #messages.error(request, "Apenas jogadores de campo podem ser colocados neste slot.")
             return redirect("my_team")
         # normalizar posição antes da checagem
         pos_norm = _normalize_position(snapshot.get("position")) or snapshot.get("position")
         if sec == "def" and pos_norm != JogadorCampo.POSITION_DEF:
-            messages.error(request, "Jogador não tem posição de defesa.")
+            #messages.error(request, "Jogador não tem posição de defesa.")
             return redirect("my_team")
         if sec == "mid" and pos_norm != JogadorCampo.POSITION_NEU:
-            messages.error(request, "Jogador não tem posição de meio-campo.")
+            #messages.error(request, "Jogador não tem posição de meio-campo.")
             return redirect("my_team")
         if sec == "off" and pos_norm != JogadorCampo.POSITION_OFF:
-            messages.error(request, "Jogador não tem posição de ataque.")
+            #messages.error(request, "Jogador não tem posição de ataque.")
             return redirect("my_team")
 
     # recuperar valor antigo do slot
@@ -495,7 +495,7 @@ def set_team_slot_view(request):
     new_pid = str(snapshot.get("id"))
 
     if old_pid and old_pid == new_pid:
-        messages.info(request, "Jogador já está neste slot.")
+        #messages.info(request, "Jogador já está neste slot.")
         return redirect("my_team")
 
     # devolver qty do antigo (se houver)
@@ -542,10 +542,10 @@ def set_team_slot_view(request):
             team.slots = s
             team.save(update_fields=["slots", "updated_at"])
     except Exception as e:
-        messages.error(request, f"Erro ao salvar o time: {e}")
+        #messages.error(request, f"Erro ao salvar o time: {e}")
         return redirect("my_team")
 
-    messages.success(request, "Jogador colocado no slot.")
+    #messages.success(request, "Jogador colocado no slot.")
     return redirect("my_team")
 
 
@@ -559,7 +559,7 @@ def clear_team_slot_view(request):
 
     slot_key = request.POST.get("slot_key")
     if not slot_key:
-        messages.error(request, "Slot inválido.")
+        #messages.error(request, "Slot inválido.")
         return redirect("my_team")
 
     user = SistemasUser.objects.select_for_update().get(pk=user.pk)
@@ -580,7 +580,7 @@ def clear_team_slot_view(request):
         old_val = old_list[idx] if idx < len(old_list) else ""
 
     if not old_val:
-        messages.info(request, "Slot já está vazio.")
+        #messages.info(request, "Slot já está vazio.")
         return redirect("my_team")
 
     inv_items = list(InventoryItem.objects.filter(user=user).select_related("content_type"))
@@ -625,25 +625,23 @@ def clear_team_slot_view(request):
             team.slots = s
             team.save(update_fields=["slots", "updated_at"])
     except Exception as e:
-        messages.error(request, f"Erro ao limpar slot: {e}")
+        #messages.error(request, f"Erro ao limpar slot: {e}")
         return redirect("my_team")
 
-    messages.success(request, "Slot liberado e inventário atualizado.")
+    #messages.success(request, "Slot liberado e inventário atualizado.")
     return redirect("my_team")
 
 def store_view(request):
     user = _get_current_user(request)
     if not user:
         return redirect("login")
-    items = [{"id": 1, "name": "Camisa", "price": 50}, {"id": 2, "name": "Bola", "price": 30}]
-    return render(request, "accounts/store.html", {"user": user, "items": items})
+    return render(request, "accounts/store.html", {"user": user})
 
 def jogos_view(request):
     user = _get_current_user(request)
     if not user:
         return redirect("login")
-    matches = [{"opponent": "Time A", "date": "2025-10-25"}, {"opponent": "Time B", "date": "2025-10-30"}]
-    return render(request, "accounts/matches.html", {"user": user, "matches": matches})
+    return render(request, "accounts/matches.html", {"user": user,})
 
 def support_view(request):
     user = _get_current_user(request)
@@ -763,7 +761,6 @@ def packs_list_view(request):
 
     last_win = request.session.pop("last_win", None)
     return render(request, "accounts/packs_list.html", {"packs": packs, "user": user, "last_win": last_win})
-
 
 @require_POST
 @transaction.atomic
@@ -916,3 +913,596 @@ def buy_pack_view(request, pack_id):
     }
 
     return redirect("/packs/#result")
+
+
+def _sample_random_players_for_ai():
+    """
+    Retorna slots para AI: dict com 'gk', 'def'(list4), 'mid'(list3), 'off'(list3).
+    Tenta pegar jogadores distintos do DB; se não houver suficiente, faz fallback reutilizando os melhores disponíveis.
+    Cada slot guarda o snapshot (dict) do jogador.
+    """
+    # busca pools
+    field_players = list(JogadorCampo.objects.all())
+    goalkeepers = list(JogadorGoleiro.objects.all())
+
+    # fallback: se vazio, criar placeholder simples (não ideal; melhor popular DB)
+    if not goalkeepers:
+        raise RuntimeError("Não há goleiros no banco de dados para gerar o time AI.")
+    if len(field_players) < 3:
+        raise RuntimeError("Não há jogadores de campo suficientes no banco para gerar o time AI.")
+
+    # shuffle para aleatoriedade
+    random.shuffle(goalkeepers)
+    random.shuffle(field_players)
+
+    # pegar 1 GK
+    gk_obj = goalkeepers[0]
+
+    # filtrar por posição para evitar escolher atacantes como zagueiro incorretamente
+    defenders_pool = [p for p in field_players if p.position == JogadorCampo.POSITION_DEF]
+    mids_pool = [p for p in field_players if p.position == JogadorCampo.POSITION_NEU]
+    offs_pool = [p for p in field_players if p.position == JogadorCampo.POSITION_OFF]
+
+    # se faltar em alguma pool, preencha com os melhores de field_players (fallback)
+    def _take(pool, needed):
+        chosen = []
+        ppool = list(pool)
+        random.shuffle(ppool)
+        while len(chosen) < needed and ppool:
+            chosen.append(ppool.pop())
+        # se ainda faltar, use membros de field_players que não estejam já escolhidos
+        if len(chosen) < needed:
+            extras = [p for p in field_players if p not in chosen]
+            for e in extras:
+                if len(chosen) >= needed:
+                    break
+                chosen.append(e)
+        return chosen
+
+    def_list = _take(defenders_pool, 4)
+    mid_list = _take(mids_pool, 3)
+    off_list = _take(offs_pool, 3)
+
+    # criar snapshots
+    def snap_from_field(p):
+        return {
+            "id": str(p.id),
+            "type": "field",
+            "name": p.name,
+            "club": p.club,
+            "country": p.country,
+            "photo_path": p.photo_path,
+            "overall": p.overall,
+            "attack": p.attack,
+            "passing": p.passing,
+            "defense": p.defense,
+            "speed": p.speed,
+            "position": p.position,
+        }
+    def snap_from_gk(g):
+        return {
+            "id": str(g.id),
+            "type": "gk",
+            "name": g.name,
+            "club": g.club,
+            "country": g.country,
+            "photo_path": g.photo_path,
+            "overall": g.overall,
+            "handling": g.handling,
+            "positioning": g.positioning,
+            "reflex": g.reflex,
+            "speed": g.speed,
+        }
+
+    ai_slots = {
+        "gk": snap_from_gk(gk_obj),
+        "def": [snap_from_field(p) for p in def_list],
+        "mid": [snap_from_field(p) for p in mid_list],
+        "off": [snap_from_field(p) for p in off_list],
+    }
+    return ai_slots
+
+def _sum_zone_overall(zone_list, expected_count):
+    """
+    Recebe lista de snapshots (podem ser dicts) e expected_count (ex: 4 para defesa).
+    Se houver menos jogadores do que esperado, o total é reduzido proporcionalmente.
+    Retorna soma ajustada (float).
+    """
+    if not zone_list:
+        return 0.0
+    actual_count = sum(1 for x in zone_list if x)
+    raw_sum = sum(float(x.get("overall", 0) or 0) for x in zone_list if isinstance(x, dict))
+    if expected_count <= 0:
+        return raw_sum
+    completeness_ratio = (actual_count / expected_count) if expected_count > 0 else 1.0
+    return raw_sum * completeness_ratio
+
+def _compute_team_composition_strength(team_slots):
+    """
+    team_slots: dict with 'gk', 'def' list, 'mid' list, 'off' list (each element snap or "")
+    returns dict with zone strengths and derived attack/defense numbers
+    """
+    gk_strength = 0.0
+    def_strength = _sum_zone_overall(team_slots.get("def") or [], 4)
+    mid_strength = _sum_zone_overall(team_slots.get("mid") or [], 3)
+    off_strength = _sum_zone_overall(team_slots.get("off") or [], 3)
+    # GK: if present use overall else 0
+    gk_snap = team_slots.get("gk") or {}
+    if isinstance(gk_snap, dict):
+        gk_strength = float(gk_snap.get("overall", 0) or 0)
+
+    # derived values
+    attack_power = off_strength + mid_strength * 0.6
+    defense_power = def_strength + gk_strength * 0.8
+    neutral_power = mid_strength
+
+    return {
+        "gk": gk_strength,
+        "def": def_strength,
+        "mid": mid_strength,
+        "off": off_strength,
+        "attack": attack_power,
+        "defense": defense_power,
+        "neutral": neutral_power,
+    }
+
+def _simulate_match(user_team_slots, ai_team_slots, seed=None):
+    """
+    Simula 90 minutos (45+45). Retorna dict com events(list), score_home, score_away, home_is_user boolean.
+    - Decide casa aleatoriamente (50/50).
+    - Em cada minuto: decide posse com base em attack vs defense, gera evento textual e marca gols conforme probabilidades.
+    - A lista 'events' terá dicionários: {minute, half, text, team_in_possession, event_type}
+    """
+    if seed is None:
+        seed = uuid.uuid4().hex
+    rnd = random.Random(seed)
+
+    # Decide quem é casa
+    home_is_user = rnd.choice([True, False])
+
+    # Map home/away slots
+    if home_is_user:
+        home_slots = user_team_slots
+        away_slots = ai_team_slots
+        home_label = "Seu Time"
+        away_label = "Adversário"
+    else:
+        home_slots = ai_team_slots
+        away_slots = user_team_slots
+        home_label = "Adversário"
+        away_label = "Seu Time"
+
+    home_strength = _compute_team_composition_strength(home_slots)
+    away_strength = _compute_team_composition_strength(away_slots)
+
+    # seed info in meta
+    meta = {"seed": str(seed), "home_is_user": home_is_user}
+
+    events = []
+    score_home = 0
+    score_away = 0
+
+    # função auxiliar para gerar textos variados simples
+    def _text_progression(team_label, action):
+        # small set of templates
+        templates = {
+            "start_possession": [
+                f"Time {team_label} pegou a bola!",
+                f"{team_label} iniciou a jogada.",
+                f"{team_label} avança com a bola."
+            ],
+            "advance": [
+                f"Eles avançam em direção ao gol...",
+                f"{team_label} progride pelo campo.",
+                f"Jogadores do {team_label} avançam pelo corredor."
+            ],
+            "intercepted": [
+                f"São interceptados!",
+                f"A jogada é cortada pela defesa adversária.",
+                f"Passe falho e a bola volta para o outro time."
+            ],
+            "offside": [
+                f"{team_label} foi impedido!",
+                f"Impedimento marcado contra {team_label}.",
+            ],
+            "cross": [
+                f"Sicrano faz um cruzamento...",
+                f"Cruzamento na área do adversário.",
+            ],
+            "shot": [
+                f"Finalização! Vamos ver...",
+                f"Tiro a gol! Que perigo!",
+            ],
+            "goal": [
+                f"GOL! GOL! GOL! DO {team_label}!!!",
+                f"É GOL de {team_label}! Que jogada!",
+            ],
+            "miss": [
+                f"Perdeu a chance por pouco!",
+                f"Finalização pra fora.",
+            ],
+            "foul": [
+                f"Falta cometida — bola parada.",
+                f"Falta dura, cartão amarelo possível."
+            ],
+            "keeper_save": [
+                f"O goleiro defende! Que defesa!",
+                f"Defesa espetacular do goleiro."
+            ]
+        }
+        bucket = templates.get(action) or ["Aconteceu algo..."]
+        return rnd.choice(bucket)
+
+    # simulate 90 minutes (1..90). We'll flag half: 1-45 first, 46-90 second.
+    for minute in range(1, 91):
+        half = 1 if minute <= 45 else 2
+
+        # Atualiza forças dinâmicas (poderia variar durante jogo; por simplicidade, recompute cada minuto)
+        home_strength = _compute_team_composition_strength(home_slots)
+        away_strength = _compute_team_composition_strength(away_slots)
+
+        # chance de posse para home = home.attack / (home.attack + away.defense)
+        home_attack = home_strength["attack"] + 1e-6
+        away_defense = away_strength["defense"] + 1e-6
+        prob_home_possession = home_attack / (home_attack + away_defense)
+
+        possession_is_home = rnd.random() < prob_home_possession
+
+        # label e strengths para o time em posse
+        attacking_label = home_label if possession_is_home else away_label
+        defending_label = away_label if possession_is_home else home_label
+        attacking_strength = home_strength if possession_is_home else away_strength
+        defending_strength = away_strength if possession_is_home else home_strength
+
+        # base progression event
+        if rnd.random() < 0.65:
+            text = _text_progression(attacking_label, "start_possession")
+            event_type = "possession_start"
+        else:
+            text = _text_progression(attacking_label, "advance")
+            event_type = "advance"
+
+        # chance to get to a shot roughly proportional to (attack / (attack + neutral + defense*0.5))
+        shot_chance_denom = attacking_strength["attack"] + attacking_strength["neutral"]*0.5 + defending_strength["defense"]*0.5 + 1e-6
+        shot_probability = (attacking_strength["attack"] / shot_chance_denom) * 0.25  # scaled
+        # small random modulation
+        shot_probability *= rnd.uniform(0.8, 1.2)
+
+        did_shot = rnd.random() < shot_probability
+
+        if did_shot:
+            # describe shot progression
+            text += " " + _text_progression(attacking_label, "shot")
+            event_type = "shot"
+            # compute goal probability: depends on attack power vs opponent GK+defense
+            shot_power = attacking_strength["attack"] * rnd.uniform(0.6, 1.4)
+            keeper_power = (defending_strength["gk"] * 1.8) + (defending_strength["def"] * 0.6)
+            goal_probability = shot_power / (shot_power + keeper_power + 1e-6)
+            goal_probability = max(0.02, min(0.7, goal_probability * 0.7))  # clamp and scale
+
+            if rnd.random() < goal_probability:
+                # GOAL!
+                text += " " + _text_progression(attacking_label, "goal")
+                event_type = "goal"
+                if possession_is_home:
+                    score_home += 1
+                else:
+                    score_away += 1
+            else:
+                # saved or missed
+                # determine saved vs miss by comparing shot_power vs keeper
+                if rnd.random() < (keeper_power / (shot_power + keeper_power + 1e-6)):
+                    text += " " + _text_progression(attacking_label, "keeper_save")
+                    event_type = "keeper_save"
+                else:
+                    text += " " + _text_progression(attacking_label, "miss")
+                    event_type = "miss"
+
+        else:
+            # no shot: maybe intercepted, offside, cross, foul
+            r = rnd.random()
+            if r < 0.12:
+                text += " " + _text_progression(attacking_label, "intercepted")
+                event_type = "intercepted"
+            elif r < 0.20:
+                text += " " + _text_progression(attacking_label, "offside")
+                event_type = "offside"
+            elif r < 0.35:
+                text += " " + _text_progression(attacking_label, "cross")
+                event_type = "cross"
+            elif r < 0.45:
+                text += " " + _text_progression(attacking_label, "foul")
+                event_type = "foul"
+            else:
+                text += " Segue a disputa no meio de campo."
+                event_type = "dribble"
+
+        events.append({
+            "minute": minute,
+            "half": half,
+            "text": text,
+            "possession_home": possession_is_home,
+            "event_type": event_type,
+            "score_home": score_home,
+            "score_away": score_away
+        })
+
+    # final meta: winner
+    if score_home > score_away:
+        winner = "home"
+    elif score_away > score_home:
+        winner = "away"
+    else:
+        winner = "draw"
+    result_meta = {"score_home": score_home, "score_away": score_away, "winner": winner}
+    return {
+        "events": events,
+        "score_home": score_home,
+        "score_away": score_away,
+        "winner": winner,
+        "meta": meta
+    }
+
+# ----------------- Views expostas -----------------
+
+@require_http_methods(["GET"])
+def game_view(request):
+    """
+    Página com modos de jogo. Por agora apenas 'Random Team'.
+    """
+    user = _get_current_user(request)
+    if not user:
+        return redirect("/login/")
+    return render(request, "accounts/game.html", {"user": user})
+
+@require_POST
+@transaction.atomic
+def start_random_match_view(request):
+    """
+    Endpoint que cria um AITeam aleatório, simula a partida inteira e grava um Match.
+    Depois redireciona para a página de reprodução (match_play).
+    """
+    user = _get_current_user(request)
+    if not user:
+        return redirect("/login/")
+
+    # pegar team do usuário (cria se não existir)
+    team_obj, _ = Team.objects.get_or_create(user=user)
+    team_obj.ensure_structure()
+
+    # montar snapshot do team do usuário (prefer snapshots se já tiverem dicts)
+    def _slot_to_snapshot(value):
+        if not value:
+            return ""
+        if isinstance(value, dict):
+            return value
+        # caso seja id string, tentar resolver em InventoryItem ou DB
+        pid = str(value)
+        inv = InventoryItem.objects.filter(user=user).filter(Q(object_id=pid) | Q(player_data__id=pid)).first()
+        if inv:
+            snap = inv.get_player_snapshot()
+            if snap:
+                # normalize position for field players
+                if snap.get("type") == "field":
+                    snap["position"] = _normalize_position(snap.get("position")) or snap.get("position")
+                return snap
+        # tentar buscar no DB
+        g = JogadorGoleiro.objects.filter(pk=pid).first()
+        if g:
+            return {
+                "id": str(g.id), "type": "gk", "name": g.name, "club": g.club,
+                "country": g.country, "photo_path": g.photo_path, "overall": g.overall,
+                "handling": g.handling, "positioning": g.positioning, "reflex": g.reflex, "speed": g.speed
+            }
+        f = JogadorCampo.objects.filter(pk=pid).first()
+        if f:
+            return {
+                "id": str(f.id), "type": "field", "name": f.name, "club": f.club,
+                "country": f.country, "photo_path": f.photo_path, "overall": f.overall,
+                "attack": f.attack, "passing": f.passing, "defense": f.defense, "speed": f.speed,
+                "position": f.position
+            }
+        return ""
+
+    user_slots = {
+        "gk": _slot_to_snapshot(team_obj.slots.get("gk")),
+        "def": [ _slot_to_snapshot(v) for v in (team_obj.slots.get("def") or []) ],
+        "mid": [ _slot_to_snapshot(v) for v in (team_obj.slots.get("mid") or []) ],
+        "off": [ _slot_to_snapshot(v) for v in (team_obj.slots.get("off") or []) ],
+    }
+
+    # gerar AI team slots
+    ai_slots = _sample_random_players_for_ai()
+
+    # criar registro AITeam
+    ai_team = AITeam.objects.create(name=f"AI Team {uuid.uuid4().hex[:6]}", slots=ai_slots)
+    # simular partida
+    sim = _simulate_match(user_slots, ai_slots)
+
+    # criar Match
+    match = Match.objects.create(
+        user_team=team_obj,
+        ai_team=ai_team,
+        home_is_user=sim["meta"]["home_is_user"],
+        events=sim["events"],
+        score_home=sim["score_home"],
+        score_away=sim["score_away"],
+        meta=sim["meta"]
+    )
+
+    return redirect("match_play", match_id=str(match.id))
+
+@require_http_methods(["GET"])
+def match_play_view(request, match_id):
+    """
+    Página que apresenta o console da partida.
+    Recebe o Match.events (lista) e exibe uma linha a cada 2s via JS.
+
+    Antes de deletar os registros do DB, copiamos tudo o que precisamos (events, placar, escalações).
+    Depois, em transação, creditamos 100 moedas ao usuário se venceu e deletamos Match e AITeam.
+    """
+    user = _get_current_user(request)
+    if not user:
+        return redirect("/login/")
+
+    match = get_object_or_404(Match, pk=match_id)
+
+    # copiar dados essenciais ANTES de deletar
+    events = list(match.events or [])
+    score_home = int(getattr(match, "score_home", 0) or 0)
+    score_away = int(getattr(match, "score_away", 0) or 0)
+    home_is_user = bool(getattr(match, "home_is_user", True))
+    ai_team = match.ai_team  # pode ser None
+    user_team = match.user_team
+
+    # resolver escalações como snapshots (listas com dicts) para mostrar no template
+    def _resolve_slot_snapshot_for_team(slot_value, user_context=None):
+        # if snapshot dict -> return it
+        if not slot_value:
+            return ""
+        if isinstance(slot_value, dict):
+            return slot_value
+        # if id string and user_context provided, try to find in inventory
+        pid = str(slot_value)
+        if user_context:
+            inv = InventoryItem.objects.filter(user=user_context).filter(Q(object_id=pid) | Q(player_data__id=pid)).first()
+            if inv:
+                snap = inv.get_player_snapshot()
+                if snap:
+                    return snap
+        # fallback: try DB lookup
+        g = JogadorGoleiro.objects.filter(pk=pid).first()
+        if g:
+            return {
+                "id": str(g.id), "type": "gk", "name": g.name, "club": g.club,
+                "country": g.country, "photo_path": g.photo_path, "overall": g.overall,
+                "handling": g.handling, "positioning": g.positioning, "reflex": g.reflex, "speed": g.speed
+            }
+        f = JogadorCampo.objects.filter(pk=pid).first()
+        if f:
+            return {
+                "id": str(f.id), "type": "field", "name": f.name, "club": f.club,
+                "country": f.country, "photo_path": f.photo_path, "overall": f.overall,
+                "attack": f.attack, "passing": f.passing, "defense": f.defense, "speed": f.speed,
+                "position": f.position
+            }
+        return ""
+
+    # build user_slots_resolved
+    if user_team:
+        raw_user_slots = user_team.slots or {}
+        user_slots_resolved = {
+            "gk": _resolve_slot_snapshot_for_team(raw_user_slots.get("gk"), user),
+            "def": [_resolve_slot_snapshot_for_team(v, user) for v in (raw_user_slots.get("def") or [])],
+            "mid": [_resolve_slot_snapshot_for_team(v, user) for v in (raw_user_slots.get("mid") or [])],
+            "off": [_resolve_slot_snapshot_for_team(v, user) for v in (raw_user_slots.get("off") or [])],
+        }
+    else:
+        user_slots_resolved = {"gk": "", "def": [], "mid": [], "off": []}
+
+    # build ai_slots_resolved (AI saved snapshots at creation)
+    if ai_team:
+        raw_ai_slots = ai_team.slots or {}
+        ai_slots_resolved = {
+            "gk": raw_ai_slots.get("gk") or "",
+            "def": raw_ai_slots.get("def") or [],
+            "mid": raw_ai_slots.get("mid") or [],
+            "off": raw_ai_slots.get("off") or []
+        }
+    else:
+        ai_slots_resolved = {"gk": "", "def": [], "mid": [], "off": []}
+
+    # montar lineups simples para o template (pos + player dict com name/photo_path)
+    user_lineup = []
+    if user_slots_resolved.get("gk"):
+        user_lineup.append({"pos":"GOL","player": user_slots_resolved["gk"]})
+    for idx, p in enumerate(user_slots_resolved.get("def") or []):
+        if p:
+            user_lineup.append({"pos": f"DEF{idx+1}", "player": p})
+    for idx, p in enumerate(user_slots_resolved.get("mid") or []):
+        if p:
+            user_lineup.append({"pos": f"MID{idx+1}", "player": p})
+    for idx, p in enumerate(user_slots_resolved.get("off") or []):
+        if p:
+            user_lineup.append({"pos": f"ATA{idx+1}", "player": p})
+
+    ai_lineup = []
+    if ai_slots_resolved.get("gk"):
+        ai_lineup.append({"pos":"GOL","player": ai_slots_resolved["gk"]})
+    for idx, p in enumerate(ai_slots_resolved.get("def") or []):
+        if p:
+            ai_lineup.append({"pos": f"DEF{idx+1}", "player": p})
+    for idx, p in enumerate(ai_slots_resolved.get("mid") or []):
+        if p:
+            ai_lineup.append({"pos": f"MID{idx+1}", "player": p})
+    for idx, p in enumerate(ai_slots_resolved.get("off") or []):
+        if p:
+            ai_lineup.append({"pos": f"ATA{idx+1}", "player": p})
+
+    # inserir evento inicial (minute=0) com escalações (narrador)
+    def lineup_text_builder(user_lineup, ai_lineup):
+        seg = []
+        seg.append("Escalações:")
+        seg.append("Seu Time -> " + ", ".join([f"{it['pos']}:{it['player'].get('name') or ''}" for it in user_lineup]) if user_lineup else "Seu Time sem jogadores")
+        seg.append("Adversário -> " + ", ".join([f"{it['pos']}:{it['player'].get('name') or ''}" for it in ai_lineup]) if ai_lineup else "Adversário sem jogadores")
+        return " | ".join(seg)
+
+    lineup_event = {
+        "minute": 0,
+        "half": 0,
+        "text": lineup_text_builder(user_lineup, ai_lineup),
+        "possession_home": None,
+        "event_type": "lineup",
+        "score_home": 0,
+        "score_away": 0
+    }
+
+    # inserir no começo da lista de events (se já tiverem)
+    events_with_lineup = [lineup_event] + (events or [])
+
+    # determinar se o usuário venceu (considerando home_is_user)
+    if home_is_user:
+        user_goal = score_home
+        opp_goal = score_away
+    else:
+        user_goal = score_away
+        opp_goal = score_home
+    user_won = user_goal > opp_goal
+
+    coins_awarded = 0
+    # transação: creditar moedas e deletar registros
+    try:
+        with transaction.atomic():
+            # recarregar user para update
+            user_locked = SistemasUser.objects.select_for_update().get(pk=user.pk)
+            if user_won:
+                user_locked.coins = (user_locked.coins or 0) + 100
+                user_locked.save(update_fields=["coins"])
+                coins_awarded = 100
+
+            # deletar ai_team e match
+            try:
+                if ai_team:
+                    ai_team.delete()
+            except Exception:
+                logger.exception("Erro ao deletar ai_team (ignorado)")
+
+            try:
+                match.delete()
+            except Exception:
+                logger.exception("Erro ao deletar match (ignorado)")
+    except Exception:
+        logger.exception("Erro durante transação de final de partida (award + delete)")
+
+    events_json = json.dumps(events_with_lineup)
+
+    return render(request, "accounts/match_play.html", {
+        "user": user,
+        "events_json": events_json,
+        "user_lineup": user_lineup,
+        "ai_lineup": ai_lineup,
+        "home_is_user": home_is_user,
+        "score_home": score_home,
+        "score_away": score_away,
+        "coins_awarded": coins_awarded,
+    })

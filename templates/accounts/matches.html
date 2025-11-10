@@ -20,14 +20,13 @@
 
       <h2>Jogos</h2>
 
-      {% if matches %} {% for m in matches %}
-      <div class="match">
-        <strong>Adversário:</strong> {{ m.opponent }} —
-        <em>Data: {{ m.date }}</em>
+      <!-- Botão para iniciar Random Team -->
+      <div style="margin-bottom:12px;">
+        <form method="post" action="{% url 'start_random_match' %}" style="display:inline-block;">
+          {% csrf_token %}
+          <button class="btn" type="submit">Jogar Random Team</button>
+        </form>
       </div>
-      {% endfor %} {% else %}
-      <p>Nenhum jogo agendado.</p>
-      {% endif %}
     </div>
   </body>
 </html>

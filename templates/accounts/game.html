@@ -1,0 +1,31 @@
+<!-- templates/accounts/game.html -->
+{% load static %}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Jogar - Modos</title>
+  <link rel="stylesheet" href="{% static 'css/style.css' %}" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; }
+    .card { padding: 16px; border:1px solid #ddd; border-radius:8px; max-width:700px; }
+    .modes { display:flex; gap:12px; margin-top:12px; }
+    .btn { padding:10px 16px; background:#0b74de; color:#fff; border-radius:8px; text-decoration:none; }
+    form { display:inline-block; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Jogar</h2>
+    <p>Escolha um modo de jogo:</p>
+    <div class="modes">
+      <form method="post" action="{% url 'start_random_match' %}">
+        {% csrf_token %}
+        <button class="btn" type="submit">Random Team</button>
+      </form>
+      <!-- futuros modos: Tournament, Custom Team etc -->
+    </div>
+    <p style="margin-top:12px;"><a href="/">Voltar</a></p>
+  </div>
+</body>
+</html>
