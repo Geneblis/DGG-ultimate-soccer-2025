@@ -1,12 +1,16 @@
+# views.py (atualizado)
 # ===== Standard Library =====
 import random
 import json
 import uuid
 import unicodedata
+import logging
+logger = logging.getLogger(__name__)
 
 # ===== Django Core =====
 from django.shortcuts import render, get_object_or_404, redirect
 from django.db import transaction, connection
+from django.db.models import Q
 from django.contrib import messages
 from django.http import JsonResponse, HttpResponseForbidden, HttpResponseBadRequest
 from django.views.decorators.http import require_POST, require_http_methods
@@ -19,40 +23,21 @@ from django.contrib.contenttypes.models import ContentType
 # ===== Local Models =====
 from .models import (
     SistemasUser, JogadorCampo, JogadorGoleiro,
-    InventoryItem, Pack
+    InventoryItem, Pack, Team
 )
-
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 def _static_path_for_club_logo(player):
-    """
-    Retorna um caminho relativo para o logo do clube que existe - exemplo:
-    'players/santos/logo.png' (para usar com {% static %}).
-    Retorna None se não existir.
-    """
-    # normaliza o nome do clube para slug (ex: "Santos FC" -> "santos-fc")
     slug = slugify(player.club or "")
     candidate = f"players/{slug}/logo.png"
-    # se suas imagens estão em STATICFILES_DIRS (ex: imagens/players/...), então
-    # {% static candidate %} deve resolver. Aqui só retornamos o path relativo.
     return candidate
 
 def _flag_url_for_country(country_code_or_name):
-    """
-    Espera que country seja o ISO alpha-2 (ex: 'br'). Se for nome longo, tenta
-    fazer um mapeamento básico; ideal é já salvar ISO no DB.
-    Retorna URL absoluta da CDN (FlagCDN) ou None.
-    """
     if not country_code_or_name:
         return None
     cc = str(country_code_or_name).strip().lower()
-    # se já é 2 letras, usa direto
     if len(cc) == 2 and cc.isalpha():
         return f"https://flagcdn.com/h40/{cc}.png"
-    # mapeamento simples (adicione os que precisar)
     MAP = {
         "brazil": "br",
         "argentina": "ar",
@@ -68,13 +53,11 @@ def _flag_url_for_country(country_code_or_name):
         "france": "fr",
         "england": "gb",
         "unitedstates": "us",
-        # adicione conforme sua necessidade...
     }
-    key = cc.lower()
-    code = MAP.get(key)
+    code = MAP.get(cc)
     if code:
         return f"https://flagcdn.com/h40/{code}.png"
-    return None  # se não souber, devolve None
+    return None
 
 def _get_current_user(request):
     uid = request.session.get("user_id")
@@ -139,12 +122,491 @@ def home_view(request):
         return redirect("login")
     return render(request, "accounts/home.html", {"user": user})
 
+## TIME ##
+
+# ===== Helpers internos =====
+def _inv_item_match_by_pid(inv_item, pid):
+    if not inv_item:
+        return False
+    try:
+        if getattr(inv_item, "object_id", None) and str(inv_item.object_id) == str(pid):
+            return True
+    except Exception:
+        pass
+    try:
+        pd = getattr(inv_item, "player_data", None)
+        if isinstance(pd, dict) and str(pd.get("id")) == str(pid):
+            return True
+    except Exception:
+        pass
+    try:
+        co = getattr(inv_item, "content_object", None)
+        if co is not None:
+            if getattr(co, "id", None) and str(co.id) == str(pid):
+                return True
+    except Exception:
+        pass
+    return False
+
+def _inv_item_snapshot(inv_item):
+    try:
+        pd = getattr(inv_item, "player_data", None)
+        if isinstance(pd, dict) and pd:
+            return dict(pd)
+    except Exception:
+        pass
+
+    try:
+        co = getattr(inv_item, "content_object", None)
+        if co:
+            if isinstance(co, JogadorCampo):
+                return {
+                    "id": str(co.id), "type": "field", "name": co.name, "club": co.club,
+                    "country": co.country, "photo_path": co.photo_path, "overall": co.overall,
+                    "attack": co.attack, "passing": co.passing, "defense": co.defense,
+                    "speed": co.speed, "position": co.position,
+                }
+            else:
+                return {
+                    "id": str(co.id), "type": "gk", "name": co.name, "club": co.club,
+                    "country": co.country, "photo_path": co.photo_path, "overall": co.overall,
+                    "handling": co.handling, "positioning": co.positioning, "reflex": co.reflex,
+                    "speed": co.speed,
+                }
+    except Exception:
+        pass
+
+    try:
+        ct = getattr(inv_item, "content_type", None)
+        oid = getattr(inv_item, "object_id", None)
+        if ct and oid:
+            model = ct.model_class()
+            p = model.objects.filter(pk=oid).first()
+            if p:
+                if isinstance(p, JogadorCampo):
+                    return {
+                        "id": str(p.id), "type": "field", "name": p.name, "club": p.club,
+                        "country": p.country, "photo_path": p.photo_path, "overall": p.overall,
+                        "attack": p.attack, "passing": p.passing, "defense": p.defense,
+                        "speed": p.speed, "position": p.position,
+                    }
+                else:
+                    return {
+                        "id": str(p.id), "type": "gk", "name": p.name, "club": p.club,
+                        "country": p.country, "photo_path": p.photo_path, "overall": p.overall,
+                        "handling": p.handling, "positioning": p.positioning, "reflex": p.reflex,
+                        "speed": p.speed,
+                    }
+    except Exception:
+        pass
+
+    return None
+
+#view da pagina de times:
+@require_http_methods(["GET"])
 def my_team_view(request):
+    """
+    Mostra 'My Team' com slots resolvidos e lista de jogadores elegíveis
+    quando ?select_slot=<slot_key> é passado.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
     user = _get_current_user(request)
     if not user:
-        return redirect("login")
-    team = {"name": f"{user.username}'s Team", "level": 1, "coins": user.coins}
-    return render(request, "accounts/my_team.html", {"user": user, "team": team})
+        return redirect("/login/")
+
+    # --- garantir que recuperamos o Team correto (passar a instância user, nunca user_id) ---
+    team, created = Team.objects.get_or_create(user=user)
+    # garantir estrutura mínima de slots
+    try:
+        team.ensure_structure()
+    except Exception:
+        # fallback: garante campo slots com a estrutura esperada
+        s = team.slots or {}
+        if "gk" not in s:
+            s["gk"] = ""
+        if "def" not in s:
+            s["def"] = ["", "", "", ""]
+        if "mid" not in s:
+            s["mid"] = ["", "", ""]
+        if "off" not in s:
+            s["off"] = ["", "", ""]
+        team.slots = s
+        team.save(update_fields=["slots"])
+
+    # --- buscar inventário do usuário ---
+    inv_rows = list(InventoryItem.objects.filter(user=user).select_related("content_type"))
+    inventory_players = []
+    inv_map = {}
+
+    # helper: tenta extrair snapshot armazenado no InventoryItem
+    def _inv_item_snapshot(item):
+        # 1) se você tem um campo JSON com snapshot (ex: player_data), use-o
+        if hasattr(item, "player_data") and item.player_data:
+            return item.player_data
+        # 2) se o content_object resolve, constrói snapshot a partir do objeto DB
+        try:
+            obj = item.get_player()
+            if obj:
+                # normaliza campos comuns (gk x field)
+                base = {
+                    "id": str(getattr(obj, "id", "")),
+                    "name": getattr(obj, "name", ""),
+                    "club": getattr(obj, "club", ""),
+                    "country": getattr(obj, "country", ""),
+                    "photo_path": getattr(obj, "photo_path", ""),
+                    "overall": getattr(obj, "overall", 0),
+                }
+                if isinstance(obj, JogadorCampo):
+                    base.update({
+                        "type": "field",
+                        "position": getattr(obj, "position", ""),
+                        "attack": getattr(obj, "attack", 0),
+                        "passing": getattr(obj, "passing", 0),
+                        "defense": getattr(obj, "defense", 0),
+                        "speed": getattr(obj, "speed", 0),
+                    })
+                else:
+                    base.update({
+                        "type": "gk",
+                        "handling": getattr(obj, "handling", 0),
+                        "positioning": getattr(obj, "positioning", 0),
+                        "reflex": getattr(obj, "reflex", 0),
+                        "speed": getattr(obj, "speed", 0),
+                    })
+                return base
+        except Exception:
+            pass
+        # 3) se InventoryItem.object_id e content_type estão definidos, devolve mínimo
+        try:
+            if getattr(item, "object_id", None):
+                return {"id": str(item.object_id)}
+        except Exception:
+            pass
+        return None
+
+    # popular inventory_players e inv_map
+    for it in inv_rows:
+        snap = _inv_item_snapshot(it)
+        if not snap:
+            # se nada, pula
+            continue
+        pid = str(snap.get("id") or it.object_id or "")
+        snap_norm = dict(snap)
+        snap_norm["id"] = pid
+        # inferir tipo se não existir
+        if "type" not in snap_norm:
+            if any(k in snap_norm for k in ("handling", "reflex", "positioning")):
+                snap_norm["type"] = "gk"
+            else:
+                snap_norm["type"] = "field"
+        snap_norm["qty"] = int(getattr(it, "qty", 1) or 1)
+        inventory_players.append(snap_norm)
+        inv_map[pid] = snap_norm
+
+    # --- construir slots prontos para template ---
+    slots = {"gk": None, "def": [], "mid": [], "off": []}
+
+    def _resolve_slot_value(val):
+        """Retorna (pid_string, player_snapshot_or_None)."""
+        if not val:
+            return ("", None)
+        if isinstance(val, dict):
+            pid = str(val.get("id") or "")
+            snap = dict(val)
+            snap["qty"] = inv_map.get(pid, {}).get("qty", 0)
+            return (pid, snap)
+        pid = str(val)
+        # primeiro tenta inv_map (itens que usuário possui)
+        if pid in inv_map:
+            return (pid, inv_map[pid])
+        # senão busca nas tabelas principais (para mostrar ficha mesmo sem qty)
+        pobj_gk = JogadorGoleiro.objects.filter(pk=pid).first()
+        if pobj_gk:
+            return (pid, {
+                "id": pid, "type": "gk", "name": pobj_gk.name, "club": pobj_gk.club,
+                "country": pobj_gk.country, "photo_path": pobj_gk.photo_path, "overall": pobj_gk.overall,
+                "handling": pobj_gk.handling, "positioning": pobj_gk.positioning, "reflex": pobj_gk.reflex,
+                "speed": pobj_gk.speed, "qty": 0
+            })
+        pobj = JogadorCampo.objects.filter(pk=pid).first()
+        if pobj:
+            return (pid, {
+                "id": pid, "type": "field", "name": pobj.name, "club": pobj.club,
+                "country": pobj.country, "photo_path": pobj.photo_path, "overall": pobj.overall,
+                "attack": pobj.attack, "passing": pobj.passing, "defense": pobj.defense,
+                "speed": pobj.speed, "position": pobj.position, "qty": 0
+            })
+        return (pid, None)
+
+    # GK
+    raw_gk = (team.slots.get("gk") if getattr(team, "slots", None) else "") or ""
+    pid, player_detail = _resolve_slot_value(raw_gk)
+    slots["gk"] = {"key": "gk", "assigned": pid or "", "player": player_detail}
+
+    # DEF (4)
+    def_list = (team.slots.get("def") if getattr(team, "slots", None) else []) or ["", "", "", ""]
+    for i in range(4):
+        v = def_list[i] if i < len(def_list) else ""
+        pid, player_detail = _resolve_slot_value(v)
+        slots["def"].append({"key": f"def_{i}", "assigned": pid or "", "player": player_detail})
+
+    # MID (3)
+    mid_list = (team.slots.get("mid") if getattr(team, "slots", None) else []) or ["", "", ""]
+    for i in range(3):
+        v = mid_list[i] if i < len(mid_list) else ""
+        pid, player_detail = _resolve_slot_value(v)
+        slots["mid"].append({"key": f"mid_{i}", "assigned": pid or "", "player": player_detail})
+
+    # OFF (3)
+    off_list = (team.slots.get("off") if getattr(team, "slots", None) else []) or ["", "", ""]
+    for i in range(3):
+        v = off_list[i] if i < len(off_list) else ""
+        pid, player_detail = _resolve_slot_value(v)
+        slots["off"].append({"key": f"off_{i}", "assigned": pid or "", "player": player_detail})
+
+    # --- filtrar elegíveis para slot selecionado ---
+    selected_slot = request.GET.get("select_slot")
+    eligible_players = []
+    if selected_slot:
+        if selected_slot == "gk":
+            eligible_players = [p for p in inventory_players if p.get("type") == "gk" and p.get("qty", 0) > 0]
+        else:
+            sec = selected_slot.split("_")[0]
+            if sec == "def":
+                eligible_players = [p for p in inventory_players if p.get("type") == "field" and p.get("position") == JogadorCampo.POSITION_DEF and p.get("qty", 0) > 0]
+            elif sec == "mid":
+                eligible_players = [p for p in inventory_players if p.get("type") == "field" and p.get("position") == JogadorCampo.POSITION_NEU and p.get("qty", 0) > 0]
+            elif sec == "off":
+                eligible_players = [p for p in inventory_players if p.get("type") == "field" and p.get("position") == JogadorCampo.POSITION_OFF and p.get("qty", 0) > 0]
+
+    # debug opcional (comente depois)
+    logger.debug("my_team_view: user=%s inventory_count=%d team_slots=%s selected_slot=%s eligible=%d",
+                 user.username, len(inventory_players), team.slots, selected_slot, len(eligible_players))
+
+    return render(request, "accounts/my_team.html", {
+        "user": user,
+        "team": {"name": f"{user.username}'s Team", "level": 1, "coins": user.coins},
+        "team_obj": team,
+        "inventory_players": inventory_players,
+        "inv_map": inv_map,
+        "slots": slots,
+        "selected_slot": selected_slot,
+        "eligible_players": eligible_players,
+    })
+
+
+
+@require_POST
+@transaction.atomic
+def set_team_slot_view(request):
+    user = _get_current_user(request)
+    if not user:
+        return redirect("/login/")
+
+    slot_key = request.POST.get("slot_key")
+    player_id = request.POST.get("player_id")
+    if not slot_key or not player_id:
+        messages.error(request, "Slot ou jogador inválido.")
+        return redirect("my_team")
+
+    user = SistemasUser.objects.select_for_update().get(pk=user.pk)
+    team, _ = Team.objects.get_or_create(user=user)
+    try:
+        team.ensure_structure()
+    except Exception:
+        if not getattr(team, "slots", None):
+            team.slots = {"gk": "", "def": ["","","",""], "mid": ["","",""], "off": ["","",""]}
+            team.save(update_fields=["slots"])
+
+    inv_items = list(InventoryItem.objects.filter(user=user).select_related("content_type"))
+    inv_new = None
+    for it in inv_items:
+        if _inv_item_match_by_pid(it, player_id):
+            inv_new = it
+            break
+
+    if not inv_new:
+        messages.error(request, "Você não possui esse jogador no inventário.")
+        return redirect("my_team")
+
+    snapshot = _inv_item_snapshot(inv_new)
+    if not snapshot:
+        messages.error(request, "Não foi possível obter os dados do jogador.")
+        return redirect("my_team")
+
+    p_type = snapshot.get("type") or ("gk" if any(k in snapshot for k in ("handling","reflex")) else "field")
+
+    if slot_key == "gk":
+        if p_type != "gk":
+            messages.error(request, "Somente goleiros podem ser colocados neste slot.")
+            return redirect("my_team")
+    else:
+        sec = slot_key.split("_")[0]
+        if p_type != "field":
+            messages.error(request, "Apenas jogadores de campo podem ser colocados neste slot.")
+            return redirect("my_team")
+        pos = snapshot.get("position")
+        if sec == "def" and pos != JogadorCampo.POSITION_DEF:
+            messages.error(request, "Jogador não tem posição de defesa.")
+            return redirect("my_team")
+        if sec == "mid" and pos != JogadorCampo.POSITION_NEU:
+            messages.error(request, "Jogador não tem posição de meio-campo.")
+            return redirect("my_team")
+        if sec == "off" and pos != JogadorCampo.POSITION_OFF:
+            messages.error(request, "Jogador não tem posição de ataque.")
+            return redirect("my_team")
+
+    old_val = ""
+    if slot_key == "gk":
+        old_val = team.slots.get("gk") if getattr(team, "slots", None) else ""
+    else:
+        sec, idx = slot_key.split("_"); idx = int(idx)
+        old_list = (team.slots.get(sec) if getattr(team, "slots", None) else []) or []
+        old_val = old_list[idx] if idx < len(old_list) else ""
+
+    old_pid = ""
+    if isinstance(old_val, dict):
+        old_pid = str(old_val.get("id") or "")
+    else:
+        old_pid = str(old_val or "")
+
+    new_pid = str(snapshot.get("id"))
+
+    if old_pid and old_pid == new_pid:
+        messages.info(request, "Jogador já está neste slot.")
+        return redirect("my_team")
+
+    if old_pid:
+        found_old = None
+        for it in inv_items:
+            if _inv_item_match_by_pid(it, old_pid):
+                found_old = it
+                break
+        if found_old:
+            found_old.qty = (found_old.qty or 0) + 1
+            found_old.save()
+        else:
+            if isinstance(old_val, dict):
+                try:
+                    ct = ContentType.objects.get_for_model(JogadorCampo) if old_val.get("type") == "field" else ContentType.objects.get_for_model(JogadorGoleiro)
+                    InventoryItem.objects.create(user=user, content_type=ct, object_id=str(old_val.get("id") or ""), player_data=old_val, qty=1)
+                except Exception:
+                    try:
+                        InventoryItem.objects.create(user=user, content_type=None, object_id=str(old_val.get("id") or ""), player_data=old_val, qty=1)
+                    except Exception:
+                        pass
+
+    inv_new.qty = (inv_new.qty or 1) - 1
+    if inv_new.qty <= 0:
+        inv_new.delete()
+    else:
+        inv_new.save()
+
+    try:
+        if hasattr(team, "set_slot"):
+            team.set_slot(slot_key, snapshot)
+        else:
+            s = team.slots or {"gk": "", "def": ["","","",""], "mid": ["","",""], "off": ["","",""]}
+            if slot_key == "gk":
+                s["gk"] = str(new_pid)
+            else:
+                sec, idx = slot_key.split("_"); idx = int(idx)
+                while len(s.get(sec, [])) <= idx:
+                    s[sec].append("")
+                s[sec][idx] = str(new_pid)
+            team.slots = s
+            team.save(update_fields=["slots", "updated_at"])
+    except Exception as e:
+        messages.error(request, f"Erro ao salvar o time: {e}")
+        return redirect("my_team")
+
+    messages.success(request, "Jogador colocado no slot.")
+    return redirect("my_team")
+
+
+@require_POST
+@transaction.atomic
+def clear_team_slot_view(request):
+    user = _get_current_user(request)
+    if not user:
+        return redirect("/login/")
+
+    slot_key = request.POST.get("slot_key")
+    if not slot_key:
+        messages.error(request, "Slot inválido.")
+        return redirect("my_team")
+
+    user = SistemasUser.objects.select_for_update().get(pk=user.pk)
+    team, _ = Team.objects.get_or_create(user=user)
+    try:
+        team.ensure_structure()
+    except Exception:
+        if not getattr(team, "slots", None):
+            team.slots = {"gk": "", "def": ["","","",""], "mid": ["","",""], "off": ["","",""]}
+            team.save(update_fields=["slots"])
+
+    old_val = ""
+    if slot_key == "gk":
+        old_val = team.slots.get("gk")
+    else:
+        sec, idx = slot_key.split("_"); idx = int(idx)
+        old_list = team.slots.get(sec) or []
+        old_val = old_list[idx] if idx < len(old_list) else ""
+
+    if not old_val:
+        messages.info(request, "Slot já está vazio.")
+        return redirect("my_team")
+
+    inv_items = list(InventoryItem.objects.filter(user=user).select_related("content_type"))
+    old_pid = ""
+    old_snapshot = None
+    if isinstance(old_val, dict):
+        old_snapshot = old_val
+        old_pid = str(old_snapshot.get("id") or "")
+    else:
+        old_pid = str(old_val or "")
+
+    found_old = None
+    for it in inv_items:
+        if _inv_item_match_by_pid(it, old_pid):
+            found_old = it
+            break
+
+    if found_old:
+        found_old.qty = (found_old.qty or 0) + 1
+        found_old.save()
+    else:
+        try:
+            if old_snapshot:
+                ct = ContentType.objects.get_for_model(JogadorCampo) if old_snapshot.get("type") == "field" else ContentType.objects.get_for_model(JogadorGoleiro)
+                InventoryItem.objects.create(user=user, content_type=ct, object_id=str(old_snapshot.get("id") or ""), player_data=old_snapshot, qty=1)
+            else:
+                InventoryItem.objects.create(user=user, content_type=None, object_id=str(old_pid), player_data=None, qty=1)
+        except Exception:
+            pass
+
+    try:
+        if hasattr(team, "clear_slot"):
+            team.clear_slot(slot_key)
+        else:
+            s = team.slots or {"gk": "", "def": ["","","",""], "mid": ["","",""], "off": ["","",""]}
+            if slot_key == "gk":
+                s["gk"] = ""
+            else:
+                sec, idx = slot_key.split("_"); idx = int(idx)
+                if s.get(sec) and idx < len(s[sec]):
+                    s[sec][idx] = ""
+            team.slots = s
+            team.save(update_fields=["slots", "updated_at"])
+    except Exception as e:
+        messages.error(request, f"Erro ao limpar slot: {e}")
+        return redirect("my_team")
+
+    messages.success(request, "Slot liberado e inventário atualizado.")
+    return redirect("my_team")
+
 
 def store_view(request):
     user = _get_current_user(request)
@@ -181,8 +643,6 @@ def missoes_view(request):
     return render(request, "accounts/missions.html", {"user": user, "missoes": missoes})
 
 def store_players_view(request):
-    #use de exemplo para listar jogadores disponiveis no pack:
-
     user = _get_current_user(request)
     if not user:
         return redirect("login")
@@ -200,13 +660,9 @@ def store_players_view(request):
         "goalkeepers": goalkeepers,
     })
 
+
 @require_http_methods(["GET"])
 def packs_list_view(request):
-    """
-    Lista packs (GET).
-    Se ?open=<pack_id> for passado, popula os jogadores desse pack (name + photo_path)
-    buscando do DB apenas os IDs presentes no JSON do Pack.
-    """
     user = _get_current_user(request)
     if not user:
         return redirect("/login/")
@@ -285,18 +741,18 @@ def packs_list_view(request):
     last_win = request.session.pop("last_win", None)
     return render(request, "accounts/packs_list.html", {"packs": packs, "user": user, "last_win": last_win})
 
+
 @require_POST
 @transaction.atomic
 def buy_pack_view(request, pack_id):
     """
     Compra de pack via POST /packs/<pack_id>/buy/
-    Versão robusta: busca o pack comparando str(p.id) contra pack_id recebido.
+    Agora armazena snapshot (player_data) no InventoryItem para evitar problemas ao exibir inventário.
     """
     user = _get_current_user(request)
     if not user:
         return redirect("/login/")
 
-    # debug
     try:
         print("DBGBUY: attempt buy, raw pack_id:", repr(pack_id), "type:", type(pack_id))
     except Exception:
@@ -304,51 +760,34 @@ def buy_pack_view(request, pack_id):
 
     pid_str = str(pack_id)
 
-    # 1) tentativa rápida por igualdade (strings)
     pack = Pack.objects.filter(id=pid_str).first()
-    if pack:
-        print("DBGBUY: found pack by direct filter(id=pid_str) ->", str(pack.id))
-    else:
-        # 2) tentativa sem hífens
+    if not pack:
         pid_nodash = pid_str.replace("-", "")
         pack = Pack.objects.filter(id__in=[pid_str, pid_nodash]).first()
-        if pack:
-            print("DBGBUY: found pack by id__in fallback ->", str(pack.id))
-
-    # 3) fallback robusto: iterar todos os packs e comparar str(p.id)
     if not pack:
-        print("DBGBUY: direct filters failed, iterating all packs to match string...")
         for p in Pack.objects.all():
             try:
                 if str(p.id) == pid_str or str(p.id).replace("-", "") == pid_str.replace("-", ""):
                     pack = p
-                    print("DBGBUY: matched by iterating Pack.objects.all():", str(p.id))
                     break
             except Exception:
                 continue
 
     if not pack:
-        # show a sample to help debugging
         sample = list(Pack.objects.values_list("id", flat=True)[:20])
         print("DBGBUY: pack NOT FOUND. pid_str:", pid_str)
-        print("DBGBUY: sample existing pack ids (first 20):")
-        for ex in sample:
-            print("  -", repr(ex), " type:", type(ex), " str:", str(ex))
+        print("DBGBUY: sample existing pack ids (first 20):", sample)
         messages.error(request, "Pack não encontrado (buy endpoint).")
         return redirect("/packs/")
 
-    # Sucesso: temos pack
     print("DBGBUY: using pack:", str(pack.id), pack.name)
 
-    # lock do usuário
     user = SistemasUser.objects.select_for_update().get(pk=user.pk)
-
     if getattr(user, "coins", 0) < pack.price:
         messages.error(request, "Moedas insuficientes.")
         print("DBGBUY: insufficient coins:", user.coins, "price:", pack.price)
         return redirect("/packs/")
 
-    # pick an entry from pack JSON
     try:
         chosen = pack.pick_random_entry()
     except Exception as e:
@@ -375,7 +814,7 @@ def buy_pack_view(request, pack_id):
         print("DBGBUY: invalid chosen_type:", chosen_type)
         return redirect("/packs/")
 
-    # buscar jogador no DB (tolerante)
+    # buscar player no DB (preferência)
     player_obj = player_model.objects.filter(id=chosen_id).first()
     if not player_obj:
         for ex in player_model.objects.values_list("id", flat=True)[:2000]:
@@ -388,24 +827,61 @@ def buy_pack_view(request, pack_id):
             except Exception:
                 continue
 
-    # criar/incrementar inventário
+    # montar snapshot (prefer dados do DB, senão a entry JSON)
+    snapshot = {}
+    if player_obj:
+        if isinstance(player_obj, JogadorCampo):
+            snapshot = {
+                "id": str(player_obj.id), "type": "field", "name": player_obj.name, "club": player_obj.club,
+                "country": player_obj.country, "photo_path": player_obj.photo_path, "overall": player_obj.overall,
+                "attack": player_obj.attack, "passing": player_obj.passing, "defense": player_obj.defense,
+                "speed": player_obj.speed, "position": player_obj.position,
+            }
+        else:
+            snapshot = {
+                "id": str(player_obj.id), "type": "gk", "name": player_obj.name, "club": player_obj.club,
+                "country": player_obj.country, "photo_path": player_obj.photo_path, "overall": player_obj.overall,
+                "handling": player_obj.handling, "positioning": player_obj.positioning,
+                "reflex": player_obj.reflex, "speed": player_obj.speed,
+            }
+    else:
+        # use chosen JSON (entry) as fallback
+        snapshot = dict(chosen)
+        snapshot["id"] = chosen_id
+        snapshot.setdefault("type", chosen_type)
+
+    # localizar InventoryItem existente (tolerante)
     ct = ContentType.objects.get_for_model(player_model)
-    inv, created = InventoryItem.objects.get_or_create(
-        user=user, content_type=ct, object_id=chosen_id, defaults={"qty": 1}
-    )
-    if not created:
-        inv.qty += 1
+    inv = InventoryItem.objects.filter(user=user).filter(
+        Q(content_type=ct, object_id=chosen_id) | Q(player_data__id=chosen_id)
+    ).first()
+
+    if inv:
+        inv.qty = (inv.qty or 0) + 1
+        # garantir que snapshot esteja salvo no registro
+        if not inv.player_data or not isinstance(inv.player_data, dict):
+            inv.player_data = snapshot
+        inv.content_type = ct
+        inv.object_id = chosen_id
         inv.save()
+    else:
+        # criar com snapshot completo
+        InventoryItem.objects.create(
+            user=user,
+            content_type=ct,
+            object_id=chosen_id,
+            player_data=snapshot,
+            qty=1
+        )
 
     # debitar coins
     user.coins -= pack.price
     user.save()
     print("DBGBUY: purchase completed. new coins:", user.coins)
 
-    # preparar last_win
-    photo_path = chosen.get("photo_path") or (getattr(player_obj, "photo_path", "") if player_obj else "")
-    player_name = chosen.get("name") or (getattr(player_obj, "name", "") if player_obj else chosen_id)
-    overall = chosen.get("overall") or (getattr(player_obj, "overall", "") if player_obj else "")
+    photo_path = snapshot.get("photo_path", "")
+    player_name = snapshot.get("name", chosen_id)
+    overall = snapshot.get("overall", "")
 
     request.session["last_win"] = {
         "id": chosen_id,
@@ -417,4 +893,3 @@ def buy_pack_view(request, pack_id):
     }
 
     return redirect("/packs/#result")
-

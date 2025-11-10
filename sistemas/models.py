@@ -101,68 +101,123 @@ class JogadorCampo(models.Model):
             return "DEF"
         return "N/A"
 
+
 class InventoryItem(models.Model):
     id = models.BigAutoField(primary_key=True)
     user = models.ForeignKey(SistemasUser, on_delete=models.CASCADE, related_name="inventory_items")
 
-    # generic relation -> aponta para JogadorCampo ou JogadorGoleiro
-    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
-    object_id = models.CharField(max_length=36)   # armazenamos UUID como string
+    # mantemos a generic relation para compatibilidade, mas agora também armazenamos snapshot JSON
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
+    object_id = models.CharField(max_length=36, blank=True, null=True)   # armazenamos UUID como string
     content_object = GenericForeignKey("content_type", "object_id")
+
+    # novo: snapshot do jogador no inventário (copy do objeto no momento da aquisição)
+    player_data = JSONField(null=True, blank=True, default=None)
 
     qty = models.IntegerField(default=1, validators=[MinValueValidator(1)])
     obtained_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         db_table = "sistemas_inventory"
+        # ainda garantimos unicidade quando content_type/object_id existirem
         unique_together = ("user", "content_type", "object_id")
         ordering = ["-obtained_at"]
 
     def __str__(self):
-        # tenta mostrar nome do player se possível
-        player = self.get_player()
-        player_name = getattr(player, "name", str(self.object_id))
-        return f"{self.user.username} - {player_name} x{self.qty}"
+        # prefere o nome do snapshot, depois tenta content_object, senão object_id
+        if self.player_data and isinstance(self.player_data, dict):
+            name = self.player_data.get("name") or str(self.object_id)
+        else:
+            player = self.get_player()
+            name = getattr(player, "name", str(self.object_id))
+        return f"{self.user.username} - {name} x{self.qty}"
 
     def clean(self):
-        allowed = {
-            ("sistemas", "jogadorcampo"),
-            ("sistemas", "jogadorgoleiro"),
-        }
+        # agora aceitamos: (content_type+object_id) OU player_data preenchido (snapshot)
         ct = self.content_type
-        if ct is None:
-            raise ValidationError("content_type não pode ser nulo.")
-        key = (ct.app_label, ct.model)
-        if key not in allowed:
-            raise ValidationError("InventoryItem só aceita JogadorCampo ou JogadorGoleiro como alvo.")
+        if (ct is None or not self.object_id) and not self.player_data:
+            raise ValidationError("InventoryItem precisa de content_type+object_id ou player_data.")
+        # se content_type presente, verifica tipo aceito (legacy)
+        if ct is not None:
+            key = (ct.app_label, ct.model)
+            allowed = {
+                ("sistemas", "jogadorcampo"),
+                ("sistemas", "jogadorgoleiro"),
+            }
+            if key not in allowed:
+                raise ValidationError("InventoryItem só aceita JogadorCampo ou JogadorGoleiro como alvo.")
 
     def save(self, *args, **kwargs):
-        # chama clean para validação simples antes de salvar
-        self.clean()
         # garantir object_id salvo como string (caso usuário passe UUID)
         if hasattr(self.object_id, "hex"):
             self.object_id = str(self.object_id)
+        # manter player_data como None ou dict
+        if self.player_data == {}:
+            self.player_data = None
         super().save(*args, **kwargs)
 
     def get_player(self):
         """Retorna o objeto do jogador (ou None)."""
+        # primeiro tenta content_object (legacy), depois tenta player_data (snapshot não vira objeto Django).
         try:
-            return self.content_object
+            if self.content_object:
+                return self.content_object
+        except Exception:
+            pass
+        return None
+
+    def get_player_snapshot(self):
+        """Retorna dicionário com os dados do jogador: preferencialmente player_data, senão
+        tenta buscar do DB via content_object e transformar em dict."""
+        if self.player_data:
+            return self.player_data
+        try:
+            player = self.get_player()
+            if not player:
+                # tentar buscar por content_type/object_id manualmente
+                if self.content_type and self.object_id:
+                    model = self.content_type.model_class()
+                    p = model.objects.filter(pk=self.object_id).values().first()
+                    if p:
+                        return dict(p)
+                return None
+            # montar snapshot reduzido (só campos relevantes)
+            if isinstance(player, JogadorCampo):
+                return {
+                    "id": str(player.id),
+                    "type": "field",
+                    "name": player.name,
+                    "club": player.club,
+                    "country": player.country,
+                    "photo_path": player.photo_path,
+                    "overall": player.overall,
+                    "attack": player.attack,
+                    "passing": player.passing,
+                    "defense": player.defense,
+                    "speed": player.speed,
+                    "position": player.position,
+                }
+            else:
+                return {
+                    "id": str(player.id),
+                    "type": "gk",
+                    "name": player.name,
+                    "club": player.club,
+                    "country": player.country,
+                    "photo_path": player.photo_path,
+                    "overall": player.overall,
+                    "handling": player.handling,
+                    "positioning": player.positioning,
+                    "reflex": player.reflex,
+                    "speed": player.speed,
+                }
         except Exception:
             return None
 
-    def get_player_type(self):
-        """Retorna 'field' ou 'gk' conforme o modelo apontado."""
-        ct = self.content_type
-        if ct is None:
-            return None
-        if (ct.app_label, ct.model) == ("sistemas", "jogadorcampo"):
-            return "field"
-        if (ct.app_label, ct.model) == ("sistemas", "jogadorgoleiro"):
-            return "gk"
-        return "unknown"
-    
+
 class Pack(models.Model):
+
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=140)
     price = models.IntegerField(default=0)
@@ -262,3 +317,64 @@ class Pack(models.Model):
         if changed:
             self.save(update_fields=["field_players", "gk_players"])
         return changed
+    
+class Team(models.Model):
+    ...
+    def set_slot(self, slot_key, player_snapshot_or_id):
+        """
+        Agora aceita:
+          - player_snapshot_or_id: dict (snapshot com campos) -> guarda este dicionário no slot
+          - ou id/UUID string -> tenta buscar snapshot no inventário/DB e guarda o snapshot
+        """
+        self.ensure_structure()
+        # tentar obter snapshot
+        snap = None
+        if isinstance(player_snapshot_or_id, dict):
+            snap = player_snapshot_or_id
+        else:
+            pid = str(player_snapshot_or_id)
+            # procurar em InventoryItem deste user por object_id ou player_data.id
+            inv = InventoryItem.objects.filter(user=self.user).filter(
+                models.Q(object_id=pid) | models.Q(player_data__id=pid)
+            ).first()
+            if inv:
+                snap = inv.get_player_snapshot()
+            else:
+                # fallback: tentar buscar direto no DB
+                f = JogadorCampo.objects.filter(pk=pid).first()
+                if f:
+                    snap = {
+                        "id": str(f.id), "type": "field", "name": f.name, "club": f.club,
+                        "country": f.country, "photo_path": f.photo_path, "overall": f.overall,
+                        "attack": f.attack, "passing": f.passing, "defense": f.defense,
+                        "speed": f.speed, "position": f.position,
+                    }
+                else:
+                    g = JogadorGoleiro.objects.filter(pk=pid).first()
+                    if g:
+                        snap = {
+                            "id": str(g.id), "type": "gk", "name": g.name, "club": g.club,
+                            "country": g.country, "photo_path": g.photo_path, "overall": g.overall,
+                            "handling": g.handling, "positioning": g.positioning,
+                            "reflex": g.reflex, "speed": g.speed,
+                        }
+        if not snap:
+            raise ValueError("Não foi possível obter snapshot do jogador para salvar no slot.")
+
+        # escrever no slot (guardar o dict)
+        if slot_key == "gk":
+            self.slots["gk"] = snap
+        else:
+            sec, idx = slot_key.split("_"); idx = int(idx)
+            self.slots[sec][idx] = snap
+        self.save(update_fields=["slots", "updated_at"])
+
+    def clear_slot(self, slot_key):
+        self.ensure_structure()
+        if slot_key == "gk":
+            self.slots["gk"] = ""
+        else:
+            sec, idx = slot_key.split("_"); idx = int(idx)
+            self.slots[sec][idx] = ""
+        self.save(update_fields=["slots", "updated_at"])
+

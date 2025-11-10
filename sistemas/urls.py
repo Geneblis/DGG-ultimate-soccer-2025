@@ -8,8 +8,12 @@ urlpatterns = [
     path("register/", views.register_view, name="register"),
     path("logout/", views.logout_view, name="logout"),
 
-    # English paths / names
-    path("my-team/", views.my_team_view, name="my_team"),
+    # meu time
+    path('my-team/', views.my_team_view, name='my_team'),
+    path('my-team/set-slot/', views.set_team_slot_view, name='set_team_slot'),
+    path('my-team/clear-slot/', views.clear_team_slot_view, name='clear_team_slot'),
+
+    #outros
     path("store/", views.store_view, name="store"),
     path("matches/", views.jogos_view, name="matches"),    # maps to jogos_view
     path("support/", views.support_view, name="support"),
