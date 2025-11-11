@@ -975,56 +975,104 @@ def buy_pack_view(request, pack_id):
 
     return redirect("/packs/#result")
 
-
 def _sample_random_players_for_ai():
     """
     Retorna slots para AI: dict com 'gk', 'def'(list4), 'mid'(list3), 'off'(list3).
-    Tenta pegar jogadores distintos do DB; se não houver suficiente, faz fallback reutilizando os melhores disponíveis.
-    Cada slot guarda o snapshot (dict) do jogador.
+    Garante que não haja jogadores com o mesmo nome (checagem por nome em lowercase).
+    Se não houver jogadores distintos suficientes para preencher todas as posições,
+    lança RuntimeError.
     """
-    # busca pools
+    # buscar pools
     field_players = list(JogadorCampo.objects.all())
     goalkeepers = list(JogadorGoleiro.objects.all())
 
-    # fallback: se vazio, criar placeholder simples (não ideal; melhor popular DB)
     if not goalkeepers:
         raise RuntimeError("Não há goleiros no banco de dados para gerar o time AI.")
     if len(field_players) < 3:
         raise RuntimeError("Não há jogadores de campo suficientes no banco para gerar o time AI.")
 
-    # shuffle para aleatoriedade
     random.shuffle(goalkeepers)
     random.shuffle(field_players)
 
-    # pegar 1 GK
-    gk_obj = goalkeepers[0]
-
-    # filtrar por posição para evitar escolher atacantes como zagueiro incorretamente
+    # preparar pools por posição
     defenders_pool = [p for p in field_players if p.position == JogadorCampo.POSITION_DEF]
     mids_pool = [p for p in field_players if p.position == JogadorCampo.POSITION_NEU]
     offs_pool = [p for p in field_players if p.position == JogadorCampo.POSITION_OFF]
 
-    # se faltar em alguma pool, preencha com os melhores de field_players (fallback)
-    def _take(pool, needed):
+    # helper para escolher N jogadores de uma pool garantindo nomes únicos (lowercase)
+    def _take_unique(pool, needed, chosen_names, chosen_ids):
         chosen = []
         ppool = list(pool)
         random.shuffle(ppool)
-        while len(chosen) < needed and ppool:
-            chosen.append(ppool.pop())
-        # se ainda faltar, use membros de field_players que não estejam já escolhidos
-        if len(chosen) < needed:
-            extras = [p for p in field_players if p not in chosen]
-            for e in extras:
-                if len(chosen) >= needed:
-                    break
-                chosen.append(e)
+        for p in ppool:
+            if len(chosen) >= needed:
+                break
+            name_norm = (p.name or "").strip().lower()
+            if not name_norm:
+                continue
+            if name_norm in chosen_names:
+                continue
+            if str(p.id) in chosen_ids:
+                continue
+            chosen.append(p)
+            chosen_names.add(name_norm)
+            chosen_ids.add(str(p.id))
         return chosen
 
-    def_list = _take(defenders_pool, 4)
-    mid_list = _take(mids_pool, 3)
-    off_list = _take(offs_pool, 3)
+    chosen_names = set()
+    chosen_ids = set()
 
-    # criar snapshots
+    # escolher goleiro (tentar garantir nome único)
+    gk_obj = None
+    for g in goalkeepers:
+        name_norm = (g.name or "").strip().lower()
+        if name_norm and name_norm not in chosen_names:
+            gk_obj = g
+            chosen_names.add(name_norm)
+            chosen_ids.add(str(g.id))
+            break
+    if not gk_obj:
+        # fallback se todos os goleiros tiverem nomes duplicados (muito raro)
+        gk_obj = goalkeepers[0]
+        chosen_names.add((gk_obj.name or "").strip().lower())
+        chosen_ids.add(str(gk_obj.id))
+
+    # tentar escolher defenders, mids e offs garantindo nomes únicos
+    def_list = _take_unique(defenders_pool, 4, chosen_names, chosen_ids)
+    mid_list = _take_unique(mids_pool, 3, chosen_names, chosen_ids)
+    off_list = _take_unique(offs_pool, 3, chosen_names, chosen_ids)
+
+    # Se alguma posição não foi completamente preenchida, tentar preencher a partir de field_players
+    def _fill_from_field(needed, current_list):
+        if len(current_list) >= needed:
+            return current_list
+        extras = list(field_players)
+        random.shuffle(extras)
+        for p in extras:
+            if len(current_list) >= needed:
+                break
+            pid = str(p.id)
+            name_norm = (p.name or "").strip().lower()
+            if not name_norm:
+                continue
+            if name_norm in chosen_names:
+                continue
+            if pid in chosen_ids:
+                continue
+            current_list.append(p)
+            chosen_names.add(name_norm)
+            chosen_ids.add(pid)
+        return current_list
+
+    def_list = _fill_from_field(4, def_list)
+    mid_list = _fill_from_field(3, mid_list)
+    off_list = _fill_from_field(3, off_list)
+
+    # se ainda faltar itens, significa que não há jogadores distintos suficientes
+    if len(def_list) < 4 or len(mid_list) < 3 or len(off_list) < 3:
+        raise RuntimeError("Não há jogadores distintos suficientes no banco para gerar um time AI sem repetições por nome.")
+
+    # construir snapshots (mesma forma anterior)
     def snap_from_field(p):
         return {
             "id": str(p.id),
@@ -1040,6 +1088,7 @@ def _sample_random_players_for_ai():
             "speed": p.speed,
             "position": p.position,
         }
+
     def snap_from_gk(g):
         return {
             "id": str(g.id),
@@ -1062,6 +1111,7 @@ def _sample_random_players_for_ai():
         "off": [snap_from_field(p) for p in off_list],
     }
     return ai_slots
+
 
 def _sum_zone_overall(zone_list, expected_count):
     """
