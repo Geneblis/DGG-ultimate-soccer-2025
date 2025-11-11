@@ -975,6 +975,8 @@ def buy_pack_view(request, pack_id):
 
     return redirect("/packs/#result")
 
+#Modo de jogo random
+
 def _sample_random_players_for_ai():
     """
     Retorna slots para AI: dict com 'gk', 'def'(list4), 'mid'(list3), 'off'(list3).
@@ -1112,7 +1114,249 @@ def _sample_random_players_for_ai():
     }
     return ai_slots
 
+#Modo de jogo autentico
 
+def _sample_authentic_players_for_ai(club_name):
+    """
+    Gera um time AI composto APENAS por jogadores cujo campo 'club' bate exatamente (case-insensitive)
+    com `club_name`. Retorna dict com slots 'gk','def','mid','off' contendo snapshots.
+    Se não houver jogadores suficientes (1 GK + 10 field players com posições adequadas),
+    retorna None para sinalizar falha.
+    """
+    if not club_name:
+        return None
+    club_query = str(club_name).strip()
+    if not club_query:
+        return None
+
+    # buscar jogadores EXATOS (case-insensitive)
+    gk_qs = list(JogadorGoleiro.objects.filter(club__iexact=club_query))
+    field_qs = list(JogadorCampo.objects.filter(club__iexact=club_query))
+
+    # precisamos de ao menos 1 goleiro e 10 jogadores de campo
+    if not gk_qs or len(field_qs) < 10:
+        return None
+
+    # separar por posição dentro do mesmo clube
+    defenders_pool = [p for p in field_qs if p.position == JogadorCampo.POSITION_DEF]
+    mids_pool = [p for p in field_qs if p.position == JogadorCampo.POSITION_NEU]
+    offs_pool = [p for p in field_qs if p.position == JogadorCampo.POSITION_OFF]
+
+    # se houver pools suficientes conforme posição, vamos usá-las.
+    # caso alguma pool seja menor que o necessário, tentamos preencher a partir de field_qs sem repetir.
+    def pick_unique_from_pool(pool, needed, taken_ids):
+        chosen = []
+        random.shuffle(pool)
+        for p in pool:
+            if len(chosen) >= needed:
+                break
+            pid = str(p.id)
+            if pid in taken_ids:
+                continue
+            chosen.append(p)
+            taken_ids.add(pid)
+        return chosen
+
+    taken_ids = set()
+    random.shuffle(gk_qs)
+    gk_obj = gk_qs[0]
+    taken_ids.add(str(gk_obj.id))
+
+    def_list = pick_unique_from_pool(defenders_pool, 4, taken_ids)
+    mid_list = pick_unique_from_pool(mids_pool, 3, taken_ids)
+    off_list = pick_unique_from_pool(offs_pool, 3, taken_ids)
+
+    # preencher a partir de todos os field_qs (mesmo clube) se alguma posição ficou faltando
+    def fill_from_all(current_list, needed):
+        if len(current_list) >= needed:
+            return current_list
+        candidates = [p for p in field_qs if str(p.id) not in taken_ids]
+        random.shuffle(candidates)
+        for p in candidates:
+            if len(current_list) >= needed:
+                break
+            current_list.append(p)
+            taken_ids.add(str(p.id))
+        return current_list
+
+    def_list = fill_from_all(def_list, 4)
+    mid_list = fill_from_all(mid_list, 3)
+    off_list = fill_from_all(off_list, 3)
+
+    # após tentativas, se ainda faltar jogadores (por posições) -> falha (None)
+    if len(def_list) < 4 or len(mid_list) < 3 or len(off_list) < 3:
+        return None
+
+    # snapshots (simples)
+    def snap_from_field(p):
+        return {
+            "id": str(p.id),
+            "type": "field",
+            "name": p.name,
+            "club": p.club,
+            "country": p.country,
+            "photo_path": p.photo_path,
+            "overall": p.overall,
+            "attack": p.attack,
+            "passing": p.passing,
+            "defense": p.defense,
+            "speed": p.speed,
+            "position": p.position,
+        }
+    def snap_from_gk(g):
+        return {
+            "id": str(g.id),
+            "type": "gk",
+            "name": g.name,
+            "club": g.club,
+            "country": g.country,
+            "photo_path": g.photo_path,
+            "overall": g.overall,
+            "handling": g.handling,
+            "positioning": g.positioning,
+            "reflex": g.reflex,
+            "speed": g.speed,
+        }
+
+    ai_slots = {
+        "gk": snap_from_gk(gk_obj),
+        "def": [snap_from_field(p) for p in def_list[:4]],
+        "mid": [snap_from_field(p) for p in mid_list[:3]],
+        "off": [snap_from_field(p) for p in off_list[:3]],
+    }
+    return ai_slots
+
+def _pick_random_club_with_enough_players(min_field_players=10, min_goalkeepers=1):
+    """
+    Retorna o nome (string) de um clube aleatório do DB que possua ao menos
+    `min_goalkeepers` goleiros e `min_field_players` jogadores de campo.
+    Retorna None se não houver clube suficiente.
+    """
+    # coletar valores brutos
+    field_clubs = JogadorCampo.objects.values_list("club", flat=True)
+    gk_clubs = JogadorGoleiro.objects.values_list("club", flat=True)
+
+    counts_field = {}
+    counts_gk = {}
+    # mapa para retornar um nome representativo com case original
+    representative_name = {}
+
+    for raw in field_clubs:
+        if not raw:
+            continue
+        key = str(raw).strip().lower()
+        counts_field[key] = counts_field.get(key, 0) + 1
+        if key not in representative_name:
+            representative_name[key] = str(raw).strip()
+
+    for raw in gk_clubs:
+        if not raw:
+            continue
+        key = str(raw).strip().lower()
+        counts_gk[key] = counts_gk.get(key, 0) + 1
+        if key not in representative_name:
+            representative_name[key] = str(raw).strip()
+
+    # encontrar candidatos que satisfaçam os requisitos
+    candidates = []
+    for key, field_count in counts_field.items():
+        gk_count = counts_gk.get(key, 0)
+        if field_count >= min_field_players and gk_count >= min_goalkeepers:
+            candidates.append(representative_name.get(key, key))
+
+    if not candidates:
+        return None
+
+    random.shuffle(candidates)
+    return candidates[0]
+
+@require_POST
+@transaction.atomic
+def start_authentic_match_view(request):
+    """
+    Inicia uma partida 'Authentic Teams' escolhendo ALEATÓRIO um clube do DB
+    que tenha pelo menos 1 GK e 10 jogadores de campo. O AI team será composto
+    exclusivamente por jogadores desse clube.
+    """
+    user = _get_current_user(request)
+    if not user:
+        return redirect("/login/")
+
+    # garantir time do usuário
+    team_obj, _ = Team.objects.get_or_create(user=user)
+    try:
+        team_obj.ensure_structure()
+    except Exception:
+        pass
+
+    # montar snapshot do time do usuário (igual aos outros modos, usado só como referência)
+    def _slot_to_snapshot(value):
+        if not value:
+            return ""
+        if isinstance(value, dict):
+            if value.get("type") == "field":
+                value["position"] = _normalize_position(value.get("position")) or value.get("position")
+            return value
+        pid = str(value)
+        inv = InventoryItem.objects.filter(user=user).filter(Q(object_id=pid) | Q(player_data__id=pid)).first()
+        if inv:
+            snap = _inv_item_snapshot(inv)
+            if snap and snap.get("type") == "field":
+                snap["position"] = _normalize_position(snap.get("position")) or snap.get("position")
+            return snap or ""
+        g = JogadorGoleiro.objects.filter(pk=pid).first()
+        if g:
+            return {
+                "id": str(g.id), "type": "gk", "name": g.name, "club": g.club,
+                "country": g.country, "photo_path": g.photo_path, "overall": g.overall,
+                "handling": g.handling, "positioning": g.positioning, "reflex": g.reflex, "speed": g.speed
+            }
+        f = JogadorCampo.objects.filter(pk=pid).first()
+        if f:
+            return {
+                "id": str(f.id), "type": "field", "name": f.name, "club": f.club,
+                "country": f.country, "photo_path": f.photo_path, "overall": f.overall,
+                "attack": f.attack, "passing": f.passing, "defense": f.defense, "speed": f.speed,
+                "position": f.position
+            }
+        return ""
+
+    user_slots = {
+        "gk": _slot_to_snapshot(team_obj.slots.get("gk")),
+        "def": [_slot_to_snapshot(v) for v in (team_obj.slots.get("def") or [])],
+        "mid": [_slot_to_snapshot(v) for v in (team_obj.slots.get("mid") or [])],
+        "off": [_slot_to_snapshot(v) for v in (team_obj.slots.get("off") or [])],
+    }
+
+    # escolher um clube aleatório do banco com jogadores suficientes
+    chosen_club = _pick_random_club_with_enough_players(min_field_players=10, min_goalkeepers=1)
+    if not chosen_club:
+        messages.error(request, "Não há clubes suficientes no banco para formar um 'Authentic Team' (é preciso pelo menos 1 GK + 10 jogadores de campo num mesmo clube).")
+        return redirect("matches")
+
+    # gerar slots exclusivamente do clube escolhido
+    ai_slots = _sample_authentic_players_for_ai(chosen_club)
+    if not ai_slots:
+        messages.error(request, f"Falha ao montar time autêntico para o clube '{chosen_club}'.")
+        return redirect("matches")
+
+    # criar AITeam, simular e criar Match (mesma lógica do random)
+    ai_team = AITeam.objects.create(name=f"AUTH {chosen_club[:12]} {uuid.uuid4().hex[:6]}", slots=ai_slots)
+    sim = _simulate_match(user_slots, ai_slots)
+
+    match = Match.objects.create(
+        user_team=team_obj,
+        ai_team=ai_team,
+        home_is_user=sim["meta"]["home_is_user"],
+        events=sim["events"],
+        score_home=sim["score_home"],
+        score_away=sim["score_away"],
+        meta=sim["meta"]
+    )
+
+    return redirect("match_play", match_id=str(match.id))
+
+##sistema de gameplay
 def _sum_zone_overall(zone_list, expected_count):
     """
     Recebe lista de snapshots (podem ser dicts) e expected_count (ex: 4 para defesa).

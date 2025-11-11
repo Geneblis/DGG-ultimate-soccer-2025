@@ -19,11 +19,16 @@
 
       <h2>Jogos</h2>
 
-      <!-- Botão para iniciar Random Team -->
+      <!-- dentro do body, onde estavam os botões -->
       <div style="margin-bottom:12px;">
         <form method="post" action="{% url 'start_random_match' %}" style="display:inline-block;">
           {% csrf_token %}
           <button class="btn" type="submit">Jogar Random Team</button>
+        </form>
+      
+        <form method="post" action="{% url 'start_authentic_match' %}" style="display:inline-block; margin-left:8px;">
+          {% csrf_token %}
+          <button class="btn" type="submit">Jogar Authentic Teams</button>
         </form>
       </div>
     </div>
