@@ -25,8 +25,9 @@ urlpatterns = [
     path("packs/", views.packs_list_view, name="packs_list"),
     path('packs/<uuid:pack_id>/buy/', views.buy_pack_view, name='buy_pack'),
 
+    # modos de jogo
     path("game/", views.game_view, name="game"),
-    path("start_authentic_match/", views.start_authentic_match_view, name="start_authentic_match"),
     path("game/start-random/", views.start_random_match_view, name="start_random_match"),
     path("game/match/<uuid:match_id>/", views.match_play_view, name="match_play"),
+    path("start_authentic_match/", views.start_authentic_match_view, name="start_authentic_match"),
 ]
