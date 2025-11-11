@@ -1,7 +1,6 @@
-<!-- templates/accounts/my_team.html -->
+{% load static %}
 <!DOCTYPE html>
 <html lang="pt-br">
-  {% load static %}
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -24,6 +23,9 @@
       .player-card img{ width:80px; height:80px; object-fit:cover; border-radius:8px; }
       .player-details { font-size:14px; }
       .muted { color:#666; font-size:13px; }
+      .messages { margin-bottom:12px; }
+      .msg-success { background:#e6ffed; border:1px solid #b7f0c7; padding:8px; border-radius:6px; color:#04662b; margin-bottom:6px; }
+      .msg-error { background:#ffecec; border:1px solid #f3b5b5; padding:8px; border-radius:6px; color:#7a1a1a; margin-bottom:6px; }
     </style>
   </head>
   <body>
@@ -33,6 +35,19 @@
         <a href="{% url 'matches' %}">Jogos</a> |
         <a href="/support/">Suporte</a>
         <span style="float: right"><a href="/logout/">Sair</a></span>
+      </div>
+
+      {# Mostrar mensagens de feedback (success / error) #}
+      <div class="messages">
+        {% if messages %}
+          {% for message in messages %}
+            {% if message.tags == "error" %}
+              <div class="msg-error">{{ message }}</div>
+            {% else %}
+              <div class="msg-success">{{ message }}</div>
+            {% endif %}
+          {% endfor %}
+        {% endif %}
       </div>
 
       <h2>Meu Time</h2>
@@ -167,14 +182,25 @@
                   <div>HAND: {{ pl.handling }} · POS: {{ pl.positioning }} · REF: {{ pl.reflex }} · VEL: {{ pl.speed }}</div>
                 {% endif %}
 
-                <form method="post" action="{% url 'set_team_slot' %}" style="margin-top:8px;">
-                  {% csrf_token %}
-                  <input type="hidden" name="slot_key" value="{{ selected_slot }}" />
-                  <input type="hidden" name="player_id" value="{{ pl.id }}" />
-                  <button type="submit" class="btn" {% if pl.qty|default:0 <= 0 %} disabled title="Sem cópias disponíveis"{% endif %}>
-                    Colocar neste slot
-                  </button>
-                </form>
+                <div style="margin-top:8px;">
+                  <form method="post" action="{% url 'set_team_slot' %}" style="display:inline-block; margin-right:8px;">
+                    {% csrf_token %}
+                    <input type="hidden" name="slot_key" value="{{ selected_slot }}" />
+                    <input type="hidden" name="player_id" value="{{ pl.id }}" />
+                    <button type="submit" class="btn" {% if pl.qty|default:0 <= 0 %} disabled title="Sem cópias disponíveis"{% endif %}>
+                      Colocar neste slot
+                    </button>
+                  </form>
+
+                  {# Botão de venda: envia para a view 'sell_inventory' que credita 100 moedas e remove/decrementa o item #}
+                  <form method="post" action="{% url 'sell_inventory' %}" style="display:inline-block; margin-left:6px;">
+                    {% csrf_token %}
+                    <input type="hidden" name="player_id" value="{{ pl.id }}" />
+                    <button type="submit" class="btn ghost" onclick="return confirm('Vender esta carta por 100 moedas?');" {% if pl.qty|default:0 <= 0 %} disabled title="Sem cópias disponíveis"{% endif %}>
+                      Vender (100)
+                    </button>
+                  </form>
+                </div>
               </div>
             </div>
           {% endfor %}

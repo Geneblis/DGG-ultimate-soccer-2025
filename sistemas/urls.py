@@ -12,15 +12,12 @@ urlpatterns = [
     path('my-team/', views.my_team_view, name='my_team'),
     path('my-team/set-slot/', views.set_team_slot_view, name='set_team_slot'),
     path('my-team/clear-slot/', views.clear_team_slot_view, name='clear_team_slot'),
+    
 
     #outros
     path("store/", views.store_view, name="store"),
     path("matches/", views.jogos_view, name="matches"),    # maps to jogos_view
-    path("support/", views.support_view, name="support"),
-
-    # extras
-    path("contracts/", views.contratos_view, name="contracts"),
-    path("missions/", views.missoes_view, name="missions"),
+    path('inventory/sell/', views.sell_inventory_item_view, name='sell_inventory'),
 
     path("store-players/", views.store_players_view, name="store_players"),
 

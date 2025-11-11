@@ -3,16 +3,14 @@
 import random
 import json
 import uuid
-import unicodedata
 import logging
 logger = logging.getLogger(__name__)
 
 # ===== Django Core =====
 from django.shortcuts import render, get_object_or_404, redirect
-from django.db import transaction, connection
+from django.db import transaction
 from django.db.models import Q
 from django.contrib import messages
-from django.http import JsonResponse, HttpResponseForbidden, HttpResponseBadRequest
 from django.views.decorators.http import require_POST, require_http_methods
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils.text import slugify
@@ -25,7 +23,6 @@ from .models import (
     SistemasUser, JogadorCampo, JogadorGoleiro,
     InventoryItem, Pack, Team, AITeam, Match
 )
-
 
 def _static_path_for_club_logo(player):
     slug = slugify(player.club or "")
@@ -416,6 +413,7 @@ def my_team_view(request):
         "eligible_players": eligible_players,
     })
 
+
 @require_POST
 @transaction.atomic
 def set_team_slot_view(request):
@@ -446,109 +444,186 @@ def set_team_slot_view(request):
             break
 
     if not inv_new:
-        #messages.error(request, "Você não possui esse jogador no inventário.")
+        messages.error(request, "Você não possui esse jogador no inventário.")
         return redirect("my_team")
 
     snapshot = _inv_item_snapshot(inv_new)
     if not snapshot:
-        #messages.error(request, "Não foi possível obter os dados do jogador.")
+        messages.error(request, "Não foi possível obter os dados do jogador.")
         return redirect("my_team")
 
-    p_type = snapshot.get("type") or ("gk" if any(k in snapshot for k in ("handling","reflex")) else "field")
+    # tipo do jogador
+    p_type = snapshot.get("type")
 
+    # validação por slot
     if slot_key == "gk":
         if p_type != "gk":
-            #messages.error(request, "Somente goleiros podem ser colocados neste slot.")
+            messages.error(request, "Somente goleiros podem ser colocados neste slot.")
             return redirect("my_team")
     else:
         sec = slot_key.split("_")[0]
+
         if p_type != "field":
-            #messages.error(request, "Apenas jogadores de campo podem ser colocados neste slot.")
+            messages.error(request, "Apenas jogadores de linha podem ocupar este slot.")
             return redirect("my_team")
-        # normalizar posição antes da checagem
-        pos_norm = _normalize_position(snapshot.get("position")) or snapshot.get("position")
+
+        pos_norm = _normalize_position(snapshot.get("position"))
         if sec == "def" and pos_norm != JogadorCampo.POSITION_DEF:
-            #messages.error(request, "Jogador não tem posição de defesa.")
+            messages.error(request, "Jogador não é defensor.")
             return redirect("my_team")
         if sec == "mid" and pos_norm != JogadorCampo.POSITION_NEU:
-            #messages.error(request, "Jogador não tem posição de meio-campo.")
+            messages.error(request, "Jogador não é meio-campista.")
             return redirect("my_team")
         if sec == "off" and pos_norm != JogadorCampo.POSITION_OFF:
-            #messages.error(request, "Jogador não tem posição de ataque.")
+            messages.error(request, "Jogador não é atacante.")
             return redirect("my_team")
+
+    # ------------------------------------------
+    # --- duplicate-name check (NOVO)
+    # ------------------------------------------
+    try:
+        new_name = (snapshot.get("name") or "").strip().lower()
+        existing_names = set()
+
+        raw_slots = team.slots or {}
+
+        # gk
+        gk = raw_slots.get("gk")
+        if gk and not (slot_key == "gk"):  # não checar o slot que está sendo trocado
+            if isinstance(gk, dict):
+                nm = gk.get("name")
+            else:
+                pobj = JogadorGoleiro.objects.filter(pk=str(gk)).first()
+                nm = pobj.name if pobj else None
+            if nm:
+                existing_names.add(nm.strip().lower())
+
+        # def/mid/off
+        for zone in ("def", "mid", "off"):
+            zone_list = raw_slots.get(zone) or []
+            for i, z in enumerate(zone_list):
+                # pular o slot atual
+                if zone + "_" + str(i) == slot_key:
+                    continue
+                if not z:
+                    continue
+                if isinstance(z, dict):
+                    nm = z.get("name")
+                else:
+                    pobj = JogadorCampo.objects.filter(pk=str(z)).first()
+                    nm = pobj.name if pobj else None
+                if nm:
+                    existing_names.add(nm.strip().lower())
+
+        if new_name in existing_names:
+            messages.error(request, "Já existe este jogador no time!")
+            return redirect("my_team")
+    except Exception:
+        pass
+    # ------------------------------------------
 
     # recuperar valor antigo do slot
     old_val = ""
     if slot_key == "gk":
-        old_val = team.slots.get("gk") if getattr(team, "slots", None) else ""
+        old_val = team.slots.get("gk")
     else:
         sec, idx = slot_key.split("_"); idx = int(idx)
-        old_list = (team.slots.get(sec) if getattr(team, "slots", None) else []) or []
-        old_val = old_list[idx] if idx < len(old_list) else ""
+        old_lst = team.slots.get(sec) or []
+        old_val = old_lst[idx] if idx < len(old_lst) else ""
 
+    # devolver jogador antigo ao inventário
     old_pid = ""
     if isinstance(old_val, dict):
-        old_pid = str(old_val.get("id") or "")
+        old_pid = str(old_val.get("id"))
     else:
-        old_pid = str(old_val or "")
+        old_pid = str(old_val)
 
-    new_pid = str(snapshot.get("id"))
-
-    if old_pid and old_pid == new_pid:
-        #messages.info(request, "Jogador já está neste slot.")
-        return redirect("my_team")
-
-    # devolver qty do antigo (se houver)
     if old_pid:
-        found_old = None
+        old_item = None
         for it in inv_items:
             if _inv_item_match_by_pid(it, old_pid):
-                found_old = it
+                old_item = it
                 break
-        if found_old:
-            found_old.qty = (found_old.qty or 0) + 1
-            found_old.save()
-        else:
-            if isinstance(old_val, dict):
-                try:
-                    ct = ContentType.objects.get_for_model(JogadorCampo) if old_val.get("type") == "field" else ContentType.objects.get_for_model(JogadorGoleiro)
-                    InventoryItem.objects.create(user=user, content_type=ct, object_id=str(old_val.get("id") or ""), player_data=old_val, qty=1)
-                except Exception:
-                    try:
-                        InventoryItem.objects.create(user=user, content_type=None, object_id=str(old_val.get("id") or ""), player_data=old_val, qty=1)
-                    except Exception:
-                        pass
+        if old_item:
+            old_item.qty += 1
+            old_item.save()
 
-    # decrementar qty do novo
-    inv_new.qty = (inv_new.qty or 1) - 1
+    # remover do inventário
+    inv_new.qty -= 1
     if inv_new.qty <= 0:
         inv_new.delete()
     else:
         inv_new.save()
 
-    # salvar no team (usando snapshot para persistir objeto no slots)
-    try:
-        if hasattr(team, "set_slot"):
-            team.set_slot(slot_key, snapshot)
-        else:
-            s = team.slots or {"gk": "", "def": ["","","",""], "mid": ["","",""], "off": ["","",""]}
-            if slot_key == "gk":
-                s["gk"] = str(new_pid)
-            else:
-                sec, idx = slot_key.split("_"); idx = int(idx)
-                while len(s.get(sec, [])) <= idx:
-                    s[sec].append("")
-                s[sec][idx] = str(new_pid)
-            team.slots = s
-            team.save(update_fields=["slots", "updated_at"])
-    except Exception as e:
-        #messages.error(request, f"Erro ao salvar o time: {e}")
-        return redirect("my_team")
+    # salvar novo jogador no time
+    team.set_slot(slot_key, snapshot)
 
-    #messages.success(request, "Jogador colocado no slot.")
+    messages.success(request, "Jogador colocado no slot!")
     return redirect("my_team")
 
 
+# ---------- NOVA VIEW: vender item do inventário ----------
+@require_POST
+@transaction.atomic
+def sell_inventory_item_view(request):
+    """
+    Vende uma carta do inventário do usuário (player_id).
+    - Procura um InventoryItem do usuário que corresponda ao player_id.
+    - Credita 100 moedas ao usuário (fixo).
+    - Decrementa qty ou deleta o InventoryItem.
+    """
+    user = _get_current_user(request)
+    if not user:
+        return redirect("/login/")
+
+    player_id = request.POST.get("player_id")
+    if not player_id:
+        messages.error(request, "Jogador inválido para venda.")
+        return redirect("my_team")
+
+    # lock user and work inside transaction
+    try:
+        user_locked = SistemasUser.objects.select_for_update().get(pk=user.pk)
+    except SistemasUser.DoesNotExist:
+        return redirect("my_team")
+
+    # localizar InventoryItem correspondente (tolerante)
+    inv_items = list(InventoryItem.objects.filter(user=user_locked).select_related("content_type"))
+    found_item = None
+    for it in inv_items:
+        if _inv_item_match_by_pid(it, player_id):
+            found_item = it
+            break
+
+    if not found_item:
+        messages.error(request, "Carta não encontrada no inventário.")
+        return redirect("my_team")
+
+    SALE_PRICE = 100  # preço fixo por sua solicitação
+
+    # creditar moedas
+    user_locked.coins = (user_locked.coins or 0) + SALE_PRICE
+    user_locked.save(update_fields=["coins"])
+
+    # decrementar ou deletar InventoryItem
+    try:
+        current_qty = int(getattr(found_item, "qty", 1) or 1)
+        if current_qty > 1:
+            found_item.qty = current_qty - 1
+            found_item.save(update_fields=["qty"])
+        else:
+            # qty == 1 -> remove registro
+            found_item.delete()
+    except Exception:
+        # fallback: tenta deletar
+        try:
+            found_item.delete()
+        except Exception:
+            logger.exception("Erro ao remover InventoryItem durante venda (ignorado).")
+
+    messages.success(request, f"Carta vendida por {SALE_PRICE} moedas.")
+    return redirect("my_team")
+# ---------- fim da nova view ----------
 
 @require_POST
 @transaction.atomic
@@ -648,20 +723,6 @@ def support_view(request):
     if not user:
         return redirect("login")
     return render(request, "accounts/support.html", {"user": user})
-
-def contratos_view(request):
-    user = _get_current_user(request)
-    if not user:
-        return redirect("login")
-    contratos = [{"id": 1, "player": "Player X", "value": 1000}, {"id": 2, "player": "Player Y", "value": 750}]
-    return render(request, "accounts/contracts.html", {"user": user, "contratos": contratos})
-
-def missoes_view(request):
-    user = _get_current_user(request)
-    if not user:
-        return redirect("login")
-    missoes = [{"id": 1, "title": "Train 3x", "reward": 50}, {"id": 2, "title": "Win a match", "reward": 100}]
-    return render(request, "accounts/missions.html", {"user": user, "missoes": missoes})
 
 def store_players_view(request):
     user = _get_current_user(request)
