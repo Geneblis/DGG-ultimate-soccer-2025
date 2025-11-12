@@ -13,7 +13,6 @@
         <a href="{% url 'home' %}">Home</a> |
         <a href="{% url 'store' %}">Loja</a> |
         <a href="{% url 'matches' %}">Jogos</a> |
-        <a href="{% url 'support' %}">Suporte</a>
         <span style="float: right"><a href="{% url 'logout' %}">Sair</a></span>
       </div>
 
@@ -28,61 +27,49 @@
         {% for p in field_players %}
         <div class="player-card">
           <div class="player-photo-wrap">
+            <!-- a própria imagem da carta -->
             <img
               class="player-photo"
               src="{% static p.photo_path %}"
               alt="{{ p.name }}"
             />
-            <div class="badge overall-badge">{{ p.overall }}</div>
 
+            <div class="badge overall-badge">{{ p.overall }}</div>
             <div class="position-abbr">{{ p.get_position_abbr }}</div>
 
-            {% if p.flag_url %}
-            <img class="flag" src="{{ p.flag_url }}" alt="{{ p.country }}" />
-            {% else %} {# opcional: tentar uma flag local chamada por exemplo
-            'flags/default.png' #}
-            <img
-              class="flag"
-              src="{% static 'flags/default.png' %}"
-              alt=""
-              onerror="this.style.display='none'"
-            />
-            {% endif %} {# Club logo: espera path relativo tipo
-            'players/santos/logo.png' em p.club_logo #} {% if p.club_logo %}
-            <img
-              class="club-badge"
-              src="{% static p.club_logo %}"
-              alt="{{ p.club }}"
-              onerror="this.style.display='none'"
-            />
-            {% endif %}
-
             <div class="photo-meta">
-              <div class="meta-line">{{ p.position }}</div>
-              <div class="meta-line">{{ p.country }}</div>
-              <div class="meta-line">{{ p.club }}</div>
+              {% if p.flag_url %}
+              <img class="flag" src="{{ p.flag_url }}" alt="{{ p.country }}" />
+              {% endif %} {% if p.club_logo %}
+              <img
+                class="club-badge"
+                src="{% static p.club_logo %}"
+                alt="{{ p.club }}"
+                onerror="this.style.display='none'"
+              />
+              {% endif %}
             </div>
 
-            <div class="stats-bottom">
-              <div class="stat-col">
-                <div class="stat">
-                  <span class="stat-label">ATK</span
-                  ><span class="stat-value">{{ p.attack }}</span>
-                </div>
-                <div class="stat">
-                  <span class="stat-label">PASS</span
-                  ><span class="stat-value">{{ p.passing }}</span>
-                </div>
+            <div class="player-name-overlay">{{ p.name }}</div>
+            <div class="stats-grid">
+              <div class="stat-block">
+                <div class="stat-label">ATK</div>
+                <div class="stat-value">{{ p.attack }}</div>
               </div>
-              <div class="stat-col">
-                <div class="stat">
-                  <span class="stat-label">DEF</span
-                  ><span class="stat-value">{{ p.defense }}</span>
-                </div>
-                <div class="stat">
-                  <span class="stat-label">VEL</span
-                  ><span class="stat-value">{{ p.speed }}</span>
-                </div>
+
+              <div class="stat-block">
+                <div class="stat-label">DEF</div>
+                <div class="stat-value">{{ p.defense }}</div>
+              </div>
+
+              <div class="stat-block">
+                <div class="stat-label">PASS</div>
+                <div class="stat-value">{{ p.passing }}</div>
+              </div>
+
+              <div class="stat-block">
+                <div class="stat-label">VEL</div>
+                <div class="stat-value">{{ p.speed }}</div>
               </div>
             </div>
           </div>
@@ -90,7 +77,7 @@
         </div>
 
         {% empty %}
-        <p>Nenhum jogador de campo cadastrado.</p>
+        <p>Nenhum jogador cadastrado.</p>
         {% endfor %}
       </div>
 
@@ -99,66 +86,59 @@
         {% for g in goalkeepers %}
         <div class="player-card">
           <div class="player-photo-wrap">
+            <!-- a própria imagem da carta -->
             <img
               class="player-photo"
               src="{% static g.photo_path %}"
               alt="{{ g.name }}"
             />
-            <div class="badge overall-badge">{{ g.overall }}</div>
 
+            <!-- overall, posição -->
+            <div class="badge overall-badge">{{ g.overall }}</div>
             <div class="position-abbr">GK</div>
 
-            {% if g.flag_url %}
-            <img class="flag" src="{{ g.flag_url }}" alt="{{ g.country }}" />
-            {% else %}
-            <img
-              class="flag"
-              src="{% static 'flags/default.png' %}"
-              alt=""
-              onerror="this.style.display='none'"
-            />
-            {% endif %} {% if g.club_logo %}
-            <img
-              class="club-badge"
-              src="{% static g.club_logo %}"
-              alt="{{ g.club }}"
-              onerror="this.style.display='none'"
-            />
-            {% endif %}
-
+            <!-- bandeira + escudo + textos (empilhados) -->
             <div class="photo-meta">
-              <div class="meta-line">{{ g.position }}</div>
-              <div class="meta-line">{{ g.country }}</div>
-              <div class="meta-line">{{ g.club }}</div>
+              {% if g.flag_url %}
+              <img class="flag" src="{{ g.flag_url }}" alt="{{ g.country }}" />
+              {% endif %} {% if g.club_logo %}
+              <img
+                class="club-badge"
+                src="{% static g.club_logo %}"
+                alt="{{ g.club }}"
+                onerror="this.style.display='none'"
+              />
+              {% endif %}
             </div>
 
-            <div class="stats-bottom">
-              <div class="stat-col">
-                <div class="stat">
-                  <span class="stat-label">HAND</span
-                  ><span class="stat-value">{{ g.handling }}</span>
-                </div>
-                <div class="stat">
-                  <span class="stat-label">POS</span
-                  ><span class="stat-value">{{ g.positioning }}</span>
-                </div>
+            <div class="player-name-overlay">{{ g.name }}</div>
+            <div class="stats-grid">
+              <div class="stat-block">
+                <div class="stat-label">HAND</div>
+                <div class="stat-value">{{ g.handling }}</div>
               </div>
-              <div class="stat-col">
-                <div class="stat">
-                  <span class="stat-label">REF</span
-                  ><span class="stat-value">{{ g.reflex }}</span>
-                </div>
-                <div class="stat">
-                  <span class="stat-label">VEL</span
-                  ><span class="stat-value">{{ g.speed }}</span>
-                </div>
+
+              <div class="stat-block">
+                <div class="stat-label">POS</div>
+                <div class="stat-value">{{ g.positioning }}</div>
+              </div>
+
+              <div class="stat-block">
+                <div class="stat-label">REF</div>
+                <div class="stat-value">{{ g.reflex }}</div>
+              </div>
+
+              <div class="stat-block">
+                <div class="stat-label">VEL</div>
+                <div class="stat-value">{{ g.speed }}</div>
               </div>
             </div>
           </div>
           <div class="player-name">{{ g.name }}</div>
         </div>
+
         {% empty %}
-        <p>Nenhum goleiro cadastrado.</p>
+        <p>Nenhum jogador cadastrado.</p>
         {% endfor %}
       </div>
     </div>

@@ -48,179 +48,234 @@ code {
   clear: both;
 }
 
-/* ===== player card improved ===== */
+/* ===== Informacoes dos jogadores ===== */
 .players-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 18px;
   margin-bottom: 24px;
 }
 
 .player-card {
-  background: #fff;
-  border: 1px solid #e3e3e3;
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
-  text-align: center;
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  overflow: visible;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+  padding: 0;
 }
 
-/* photo area */
+/* wrapper com proporção exata da carta */
 .player-photo-wrap {
   position: relative;
   width: 100%;
-  background: #111;
+  aspect-ratio: 381 / 526;
+  overflow: hidden;
+  border-radius: 12px;
+  display: block;
+  background: #000;
 }
 
-/* imagem ocupa todo o topo, com object-fit e altura maior */
+/* imagem cobre todo o wrapper */
 .player-photo {
-  display: block;
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: 320px; /* aumentei pra dar espaço, ajuste se quiser */
+  height: 100%;
   object-fit: cover;
-  transform-origin: center;
+  display: block;
   transition: transform 0.25s ease;
 }
 .player-card:hover .player-photo {
   transform: scale(1.03);
 }
 
-/* overall badge (top-left) */
+/* overall - canto superior esquerdo */
 .badge.overall-badge {
   position: absolute;
-  top: 10px;
-  left: 10px;
-  background: rgba(0, 0, 0, 0.75);
+  top: 60px;
+  left: 12px;
+  bottom: 15px; /**/ /*pode remover se n gostar do efeito */
+  background: rgba(0, 0, 0, 0.35);
   color: #fff;
-  padding: 6px 10px;
-  font-weight: 800;
-  border-radius: 6px;
-  font-size: 16px;
-  letter-spacing: 0.5px;
+  padding: 8px 12px;
+  font-weight: 900;
+  border-radius: 8px;
+  font-size: 18px;
+  z-index: 20;
 }
 
-/* posição grande (top-right) abreviada */
+/* posição - canto superior direito */
 .position-abbr {
   position: absolute;
-  top: 8px;
-  right: 10px;
-  background: rgba(255, 255, 255, 0.85);
+  top: 78px;
+  right: 12px;
+  background: rgba(255, 255, 255, 0.95);
   color: #111;
-  padding: 6px 8px;
-  border-radius: 6px;
-  font-weight: 700;
-  font-size: 14px;
-  opacity: 0.95;
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-weight: 800;
+  font-size: 13px;
+  z-index: 40;
 }
 
-/* bandeira e escudo (lado esquerdo, empilhados) */
-.flag {
+/* grid da bandeira e club, orientacao por aqui. */
+.photo-meta {
   position: absolute;
-  left: 10px;
-  top: 56px;
+  left: 12px;
+  top: 110px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  z-index: 35;
+}
+
+/* ignore esses 2, mexe apenas no de cima pfv. */
+.photo-meta .flag {
   width: 48px;
   height: 30px;
   object-fit: cover;
-  border-radius: 4px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  border-radius: 3px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
-.club-badge {
-  position: absolute;
-  left: 12px;
-  top: 96px;
+.photo-meta .club-badge {
   width: 42px;
   height: 42px;
   object-fit: contain;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 3px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.75);
-  padding: 4px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
 
-/* photo-meta: pequenas linhas (posição/país/time) - movi pra cima do fade, com menos opacidade */
-.photo-meta {
+/* NOME grande central-baixo (overlay, acima dos stats) */
+.player-name-overlay {
   position: absolute;
-  left: 10px;
-  bottom: 110px; /* fica acima dos stats */
-  text-align: left;
-  font-size: 13px;
-  line-height: 1;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 150px;
+  z-index: 36;
+  padding: 6px 12px;
+  font-weight: 900;
   color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
-}
-.photo-meta .meta-line {
-  display: block;
-  background: rgba(0, 0, 0, 0.45);
-  padding: 4px 8px;
-  margin-bottom: 6px;
-  border-radius: 4px;
-  font-weight: 600;
+  border-radius: 8px;
+  font-size: 18px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
-/* bottom stats: menor, sem cobrir muito da foto */
-.stats-bottom {
+/* GRID DE STATS: 2 colunas x 2 linhas dentro da base da carta */
+.stats-grid {
   position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 100%;
-  background: linear-gradient(
-    0deg,
-    rgba(0, 0, 0, 0.72),
-    rgba(0, 0, 0, 0.18) 40%,
-    rgba(0, 0, 0, 0)
-  );
-  color: #fff;
-  padding: 10px;
-  box-sizing: border-box;
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
-  align-items: center;
-  min-height: 54px;
-}
-
-/* duas colunas alinhadas conforme pedido */
-.stat-col {
-  width: 50%;
+  left: 14px;
+  right: 14px;
+  bottom: 38px;
+  z-index: 66;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px 12px;
+  grid-template-rows: auto auto;
+  gap: 8px 18px;
+  align-items: end;
+  justify-items: stretch;
 }
 
-.stat {
+/* cada bloco de stat ocupa uma célula */
+.stat-block {
   display: flex;
-  justify-content: space-between;
-  font-size: 13px;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
 }
 
+/* label e valor estilizados (valor grande como no protótipo) */
 .stat-label {
-  opacity: 0.9;
-  font-weight: 700;
   font-size: 12px;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.95);
+  margin-bottom: 4px;
   letter-spacing: 0.6px;
+  text-transform: uppercase;
 }
 
 .stat-value {
-  font-weight: 800;
+  font-size: 20px;
+  font-weight: 900;
+  color: #ffe84d; /* destaque amarelo */
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
 }
 
-/* nome abaixo da foto */
 .player-name {
-  padding: 10px;
-  font-weight: 800;
-  border-top: 1px solid #f0f0f0;
-  font-size: 15px;
-  background: linear-gradient(180deg, #fff, #fafafa);
+  display: none;
 }
 
-/* helper */
-.btn {
-  display: inline-block;
-  padding: 6px 10px;
-  background: #1473e6;
-  color: #fff;
-  text-decoration: none;
-  border-radius: 6px;
-  font-weight: 600;
+/* ----- modal pack ----- */
+/* ---------- mensagens ------------- */
+.messages { margin: 12px 0; }
+.message { padding: 10px 12px; border-radius: 6px; margin-bottom: 8px; }
+.message.error { background: #ffe6e6; color: #900; border: 1px solid #f5c6c6; }
+.message.success { background: #e7ffe7; color: #0a6; border: 1px solid #c7f0c7; }
+
+/* ---------- packs grid simples (ajuste conforme seu css existente) ---------- */
+.packs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
 }
+
+/* pack thumb */
+.pack-thumb {
+  width: 302px;
+  height: 572px;
+  object-fit: contain; /* mantém a imagem inteira sem cortar */
+  background: #f4f4f4;  /* caso imagem tenha espaço, fica com fundo neutro */
+  border-radius: 6px;
+  display: block;
+  margin: 0 auto 8px auto;
+}
+
+/* ----- Modal (CSS only using :target) ----- */
+.pack-modal { display: none; position: fixed; inset: 0; z-index: 2000; }
+.pack-modal:target { display: block; }
+.pack-modal-backdrop {
+  position: absolute; inset: 0; background: rgba(0,0,0,0.55);
+}
+.pack-modal-content {
+  position: relative;
+  width: min(1100px, 95%);
+  max-height: 90vh;
+  margin: 4vh auto;
+  background: #fff;
+  border-radius: 10px;
+  overflow: auto;
+  padding: 18px;
+  z-index: 2010;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+}
+.modal-close {
+  position: absolute;
+  right: 12px;
+  top: 8px;
+  font-size: 24px;
+  text-decoration: none;
+  color: #333;
+}
+.pack-modal-grid { display: grid; grid-template-areas: "img desc" "cards cards" "footer footer"; grid-template-columns: 320px 1fr; gap: 16px; }
+.pack-modal-image { grid-area: img; display:flex; align-items:center; justify-content:center; }
+.pack-modal-image img {
+  width: 303px;
+  height: 572px;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+}
+.pack-modal-desc { grid-area: desc; padding: 8px 12px; }
+.pack-modal-cards { grid-area: cards; display:flex; flex-wrap:wrap; gap: 12px; justify-content:center; padding: 12px; background: linear-gradient(180deg,#fafafa,#fff); border-radius:6px; }
+.player-card-small-modal { width: 160px; text-align:center; background:#fff; padding:6px; border-radius:6px; box-shadow:0 3px 8px rgba(0,0,0,0.06); }
+.player-card-small-modal img {
+  width: 100%;
+  height: 180px;
+  object-fit: cover; /* mini-cards podem cortar para ficarem consistentes */
+  border-radius: 4px;
+}
+.pack-modal-footer { grid-area: footer; display:flex; justify-content:space-between; align-items:center; padding-top:8px; border-top:1px solid #eee; margin-top:8px; }

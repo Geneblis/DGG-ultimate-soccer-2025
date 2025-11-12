@@ -1,0 +1,156 @@
+<!-- templates/accounts/match_play.html -->
+{% load static %}
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Partida</title>
+  <link rel="stylesheet" href="{% static 'css/style.css' %}" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 1.5rem; background:#f7f8fa; }
+    .container { max-width:900px; margin:0 auto; }
+    .score { display:flex; justify-content:space-between; align-items:center; padding:10px; background:#fff; border-radius:8px; border:1px solid #eee; }
+    .lineups { display:flex; gap:12px; margin-top:12px; }
+    .team-box { background:#fff; padding:10px; border-radius:8px; border:1px solid #eee; flex:1; }
+    .player-item { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+    .player-item img { width:40px; height:40px; object-fit:cover; border-radius:6px; background:#f0f0f0; }
+    .console { margin-top:12px; background:#111; color:#eee; padding:12px; min-height:320px; border-radius:8px; overflow:auto; font-family:monospace; }
+    .event { padding:6px 4px; border-bottom:1px solid rgba(255,255,255,0.03); }
+    .minute { color:#9bd; margin-right:8px; }
+    .final { margin-top:12px; padding:12px; background:#fff; border-radius:8px; border:1px solid #eee; }
+    .btn { padding:8px 12px; border-radius:8px; background:#0b74de; color:#fff; text-decoration:none; display:inline-block; }
+    .reward { color: green; font-weight:700; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Partida</h2>
+
+    <div class="score">
+      <div><strong>{% if home_is_user %}Seu Time{% else %}Adversário{% endif %}</strong></div>
+      <div id="live-score">{{ score_home }} — {{ score_away }}</div>
+      <div><strong>{% if not home_is_user %}Seu Time{% else %}Adversário{% endif %}</strong></div>
+    </div>
+
+    <div class="lineups">
+      <div class="team-box">
+        <h4>Seu Time</h4>
+        {% if user_lineup %}
+          {% for it in user_lineup %}
+            <div class="player-item">
+              {% if it.player.photo_path %}
+                <img src="{% static it.player.photo_path %}" alt="{{ it.player.name }}">
+              {% else %}
+                <img src="{% static 'images/default-player.png' %}" alt="sem foto">
+              {% endif %}
+              <div>
+                <div style="font-weight:700">{{ it.player.name }}</div>
+                <div style="font-size:12px" class="muted">{{ it.pos }}</div>
+              </div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <p class="muted">Sem escalação.</p>
+        {% endif %}
+      </div>
+
+      <div class="team-box">
+        <h4>Adversário</h4>
+        {% if ai_lineup %}
+          {% for it in ai_lineup %}
+            <div class="player-item">
+              {% if it.player.photo_path %}
+                <img src="{% static it.player.photo_path %}" alt="{{ it.player.name }}">
+              {% else %}
+                <img src="{% static 'images/default-player.png' %}" alt="sem foto">
+              {% endif %}
+              <div>
+                <div style="font-weight:700">{{ it.player.name }}</div>
+                <div style="font-size:12px" class="muted">{{ it.pos }}</div>
+              </div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <p class="muted">Sem escalação.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="console" id="match-console" aria-live="polite"></div>
+
+    <div class="final" id="final-block" style="display:none;">
+      <h3>Resultado final</h3>
+      <div id="final-score"></div>
+      <p id="winner-text"></p>
+      <p id="reward-text"></p>
+      <p><a class="btn" href="{% url 'game' %}">Voltar aos modos</a></p>
+    </div>
+  </div>
+
+  <script>
+    const events = {{ events_json|safe }};
+    const consoleEl = document.getElementById("match-console");
+    const liveScoreEl = document.getElementById("live-score");
+    const finalBlock = document.getElementById("final-block");
+    const finalScoreEl = document.getElementById("final-score");
+    const winnerTextEl = document.getElementById("winner-text");
+    const rewardTextEl = document.getElementById("reward-text");
+
+    let idx = 0;
+    let intervalMs = 2000;
+    let lastScoreHome = {{ score_home }};
+    let lastScoreAway = {{ score_away }};
+
+    function renderEvent(ev) {
+      const div = document.createElement("div");
+      div.className = "event";
+      const minuteSpan = document.createElement("span");
+      minuteSpan.className = "minute";
+      minuteSpan.textContent = (ev.minute === 0 ? "[Escalação]" : "[" + ev.minute + "']") ;
+      const textNode = document.createElement("span");
+      textNode.textContent = " " + ev.text + " ";
+      div.appendChild(minuteSpan);
+      div.appendChild(textNode);
+      consoleEl.appendChild(div);
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+
+      if (typeof ev.score_home !== "undefined") {
+        lastScoreHome = ev.score_home;
+        lastScoreAway = ev.score_away;
+        liveScoreEl.textContent = lastScoreHome + " — " + lastScoreAway;
+      }
+    }
+
+    function finishMatch() {
+      finalBlock.style.display = "block";
+      finalScoreEl.textContent = lastScoreHome + " — " + lastScoreAway;
+      let winner = "Empate";
+      // determinar vencedor relativo ao usuário (será avaliado no servidor também)
+      if (lastScoreHome > lastScoreAway) {
+        winner = "{% if home_is_user %}Você venceu!{% else %}Adversário venceu.{% endif %}";
+      } else if (lastScoreAway > lastScoreHome) {
+        winner = "{% if not home_is_user %}Você venceu!{% else %}Adversário venceu.{% endif %}";
+      }
+      winnerTextEl.textContent = winner;
+      {% if coins_awarded and coins_awarded > 0 %}
+        rewardTextEl.innerHTML = "<span class='reward'>Você recebeu +{{ coins_awarded }} moedas!</span>";
+      {% endif %}
+    }
+
+    if (!events || events.length === 0) {
+      consoleEl.innerHTML = "<div class='event'>Nenhum evento registrado nesta partida.</div>";
+      finishMatch();
+    } else {
+      const timer = setInterval(() => {
+        if (idx >= events.length) {
+          clearInterval(timer);
+          finishMatch();
+          return;
+        }
+        const ev = events[idx++];
+        renderEvent(ev);
+      }, intervalMs);
+    }
+  </script>
+</body>
+</html>

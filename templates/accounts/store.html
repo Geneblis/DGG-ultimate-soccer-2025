@@ -30,8 +30,7 @@
     <div class="container">
       <div class="nav">
         <a href="/">Home</a> | <a href="/store/">Loja</a> |
-        <a href="{% url 'matches' %}">Jogos</a> | |
-        <a href="/support/">Suporte</a>
+        <a href="{% url 'matches' %}">Jogos</a> |
         <span style="float: right"><a href="/logout/">Sair</a></span>
       </div>
 
@@ -39,15 +38,8 @@
 
       <p>
         <a class="btn" href="{% url 'store_players' %}">Mostrar Jogadores</a>
+        <a class="btn" href="{% url 'packs_list' %}">Pacotes</a>
       </p>
-
-      {% if items %} {% for it in items %}
-      <div class="item">
-        <strong>{{ it.name }}</strong> — {{ it.price }} moedas
-      </div>
-      {% endfor %} {% else %}
-      <p>Loja vazia no momento.</p>
-      {% endif %}
     </div>
   </body>
 </html>

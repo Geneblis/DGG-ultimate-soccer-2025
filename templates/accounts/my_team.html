@@ -1,35 +1,35 @@
+{% load static %}
 <!DOCTYPE html>
 <html lang="pt-br">
-  {% load static %}
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>My Team</title>
-
     <link rel="stylesheet" href="{% static 'css/style.css' %}" />
-
     <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 2rem;
-      }
-      .container {
-        max-width: 700px;
-        margin: 0 auto;
-      }
-      .nav {
-        margin-bottom: 12px;
-      }
-      .card {
-        padding: 12px;
-        border: 1px solid #ddd;
-        border-radius: 6px;
-      }
+      body { font-family: Arial, sans-serif; margin: 2rem; }
+      .container { max-width: 1100px; margin: 0 auto; }
+      .nav { margin-bottom: 12px; }
+      .card { padding: 12px; border: 1px solid #ddd; border-radius: 6px; background:#fff; }
+      .team-grid { display:flex; gap:12px; flex-wrap:wrap; margin-top:12px; }
+      .zone { flex:1; min-width:220px; background:#fbfbfb; border:1px solid #eee; padding:10px; border-radius:8px; }
+      .slot { border:1px dashed #ddd; padding:8px; border-radius:6px; margin-bottom:8px; display:flex; gap:8px; align-items:center; }
+      .slot img { width:56px; height:56px; object-fit:cover; border-radius:6px; background:#f0f0f0; }
+      .slot .meta { flex:1; }
+      .btn { padding:6px 10px; border-radius:6px; background:#0b74de; color:#fff; border:none; cursor:pointer; text-decoration:none; display:inline-block; }
+      .btn.ghost { background:transparent; color:#0b74de; border:1px solid #0b74de; }
+      .inventory { margin-top:18px; }
+      .player-card { border:1px solid #eee; padding:8px; border-radius:6px; display:flex; gap:10px; align-items:center; margin-bottom:8px; background:#fff; }
+      .player-card img{ width:80px; height:80px; object-fit:cover; border-radius:8px; }
+      .player-details { font-size:14px; }
+      .muted { color:#666; font-size:13px; }
+      .messages { margin-bottom:12px; }
+      .msg-success { background:#e6ffed; border:1px solid #b7f0c7; padding:8px; border-radius:6px; color:#04662b; margin-bottom:6px; }
+      .msg-error { background:#ffecec; border:1px solid #f3b5b5; padding:8px; border-radius:6px; color:#7a1a1a; margin-bottom:6px; }
     </style>
   </head>
   <body>
     <div class="container">
-      <!-- Header: aqui mostramos "Home | Loja | Jogos | Suporte" -->
       <div class="nav">
         <a href="/">Home</a> | <a href="/store/">Loja</a> |
         <a href="{% url 'matches' %}">Jogos</a> |
@@ -37,14 +37,182 @@
         <span style="float: right"><a href="/logout/">Sair</a></span>
       </div>
 
-      <h2>My Team</h2>
+      {# Mostrar mensagens de feedback (success / error) #}
+      <div class="messages">
+        {% if messages %}
+          {% for message in messages %}
+            {% if message.tags == "error" %}
+              <div class="msg-error">{{ message }}</div>
+            {% else %}
+              <div class="msg-success">{{ message }}</div>
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+      </div>
+
+      <h2>Meu Time</h2>
+
       <div class="card">
         <p><strong>Time:</strong> {{ team.name }}</p>
         <p><strong>Nível:</strong> {{ team.level }}</p>
         <p><strong>Moedas:</strong> {{ team.coins }}</p>
       </div>
 
-      <p style="margin-top: 12px"><a href="/">Voltar para Home</a></p>
+      <div class="team-grid">
+        <!-- Goleiro -->
+        <div class="zone">
+          <h4>Goleiro</h4>
+          <div class="slot">
+            {% if slots.gk and slots.gk.player %}
+              {% with pl=slots.gk.player %}
+                <img src="{% static pl.photo_path %}" alt="{{ pl.name }}" />
+                <div class="meta">
+                  <div style="font-weight:700">{{ pl.name }}</div>
+                  <div class="muted">{{ pl.club }} — {{ pl.country }}</div>
+                  <div class="muted">Overall: {{ pl.overall }}</div>
+                </div>
+              {% endwith %}
+              <form method="post" action="{% url 'clear_team_slot' %}">
+                {% csrf_token %}
+                <input type="hidden" name="slot_key" value="gk" />
+                <button type="submit" class="btn ghost">Remover</button>
+              </form>
+            {% else %}
+              <div class="meta">Slot vazio</div>
+              <a class="btn" href="{% url 'my_team' %}?select_slot=gk">Escolher jogador</a>
+            {% endif %}
+          </div>
+        </div>
+
+        <!-- Defesa (4 slots) -->
+        <div class="zone">
+          <h4>Defesa</h4>
+          {% for s in slots.def %}
+            <div class="slot">
+              {% if s.player %}
+                <img src="{% static s.player.photo_path %}" alt="{{ s.player.name }}" />
+                <div class="meta">
+                  <div style="font-weight:700">{{ s.player.name }}</div>
+                  <div class="muted">{{ s.player.club }} — {{ s.player.country }}</div>
+                  <div class="muted">Overall: {{ s.player.overall }}</div>
+                </div>
+                <form method="post" action="{% url 'clear_team_slot' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="slot_key" value="{{ s.key }}" />
+                  <button type="submit" class="btn ghost">Remover</button>
+                </form>
+              {% else %}
+                <div class="meta">Slot defesa {{ forloop.counter }}</div>
+                <a class="btn" href="{% url 'my_team' %}?select_slot={{ s.key }}">Escolher jogador</a>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+
+        <!-- Meio (3 slots) -->
+        <div class="zone">
+          <h4>Meio</h4>
+          {% for s in slots.mid %}
+            <div class="slot">
+              {% if s.player %}
+                <img src="{% static s.player.photo_path %}" alt="{{ s.player.name }}" />
+                <div class="meta">
+                  <div style="font-weight:700">{{ s.player.name }}</div>
+                  <div class="muted">{{ s.player.club }} — {{ s.player.country }}</div>
+                  <div class="muted">Overall: {{ s.player.overall }}</div>
+                </div>
+                <form method="post" action="{% url 'clear_team_slot' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="slot_key" value="{{ s.key }}" />
+                  <button type="submit" class="btn ghost">Remover</button>
+                </form>
+              {% else %}
+                <div class="meta">Slot meio {{ forloop.counter }}</div>
+                <a class="btn" href="{% url 'my_team' %}?select_slot={{ s.key }}">Escolher jogador</a>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+
+        <!-- Ataque (3 slots) -->
+        <div class="zone">
+          <h4>Ataque</h4>
+          {% for s in slots.off %}
+            <div class="slot">
+              {% if s.player %}
+                <img src="{% static s.player.photo_path %}" alt="{{ s.player.name }}" />
+                <div class="meta">
+                  <div style="font-weight:700">{{ s.player.name }}</div>
+                  <div class="muted">{{ s.player.club }} — {{ s.player.country }}</div>
+                  <div class="muted">Overall: {{ s.player.overall }}</div>
+                </div>
+                <form method="post" action="{% url 'clear_team_slot' %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="slot_key" value="{{ s.key }}" />
+                  <button type="submit" class="btn ghost">Remover</button>
+                </form>
+              {% else %}
+                <div class="meta">Slot ataque {{ forloop.counter }}</div>
+                <a class="btn" href="{% url 'my_team' %}?select_slot={{ s.key }}">Escolher jogador</a>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <!-- INVENTÁRIO: exibido se ?select_slot=... estiver presente -->
+      {% if selected_slot %}
+      <div class="inventory">
+        <h3>Escolher jogador para o slot: <strong>{{ selected_slot }}</strong></h3>
+        {% if eligible_players %}
+          {% for pl in eligible_players %}
+            <div class="player-card">
+              {% if pl.photo_path %}
+                <img src="{% static pl.photo_path %}" alt="{{ pl.name }}" />
+              {% else %}
+                <img src="{% static 'images/default-player.png' %}" alt="Sem foto" />
+              {% endif %}
+              <div class="player-details">
+                <div style="font-weight:700">{{ pl.name }} {% if pl.qty %}x{{ pl.qty }}{% endif %}</div>
+                <div class="muted">{{ pl.club }} — {{ pl.country }}</div>
+                <div class="muted">Tipo: {{ pl.type }} — Overall: {{ pl.overall }}</div>
+                {% if pl.type == "field" %}
+                  <div>Atk: {{ pl.attack }} · Def: {{ pl.defense }} · Pass: {{ pl.passing }} · Vel: {{ pl.speed }}</div>
+                {% else %}
+                  <div>HAND: {{ pl.handling }} · POS: {{ pl.positioning }} · REF: {{ pl.reflex }} · VEL: {{ pl.speed }}</div>
+                {% endif %}
+
+                <div style="margin-top:8px;">
+                  <form method="post" action="{% url 'set_team_slot' %}" style="display:inline-block; margin-right:8px;">
+                    {% csrf_token %}
+                    <input type="hidden" name="slot_key" value="{{ selected_slot }}" />
+                    <input type="hidden" name="player_id" value="{{ pl.id }}" />
+                    <button type="submit" class="btn" {% if pl.qty|default:0 <= 0 %} disabled title="Sem cópias disponíveis"{% endif %}>
+                      Colocar neste slot
+                    </button>
+                  </form>
+
+                  {# Botão de venda: envia para a view 'sell_inventory' que credita 100 moedas e remove/decrementa o item #}
+                  <form method="post" action="{% url 'sell_inventory' %}" style="display:inline-block; margin-left:6px;">
+                    {% csrf_token %}
+                    <input type="hidden" name="player_id" value="{{ pl.id }}" />
+                    <button type="submit" class="btn ghost" onclick="return confirm('Vender esta carta por 100 moedas?');" {% if pl.qty|default:0 <= 0 %} disabled title="Sem cópias disponíveis"{% endif %}>
+                      Vender (100)
+                    </button>
+                  </form>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <p>Nenhum jogador elegível no inventário.</p>
+        {% endif %}
+
+        <p style="margin-top:12px;"><a href="{% url 'my_team' %}" class="btn ghost">Cancelar</a></p>
+      </div>
+      {% endif %}
+
+      <p style="margin-top: 18px"><a href="/">Voltar para Home</a></p>
     </div>
   </body>
 </html>
