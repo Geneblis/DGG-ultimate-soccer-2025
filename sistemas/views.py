@@ -1,4 +1,3 @@
-# views.py (atualizado)
 # ===== Standard Library =====
 import random
 import json
