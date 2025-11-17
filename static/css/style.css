@@ -16,6 +16,7 @@ body {
   text-decoration: none;
   color: #1a73e8;
   margin-right: 8px;
+  
 }
 .nav a.active {
   text-decoration: underline;

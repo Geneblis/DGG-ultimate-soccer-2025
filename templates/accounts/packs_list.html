@@ -8,51 +8,255 @@
     <title>Pacotes — DGG's Ultimate Brasileirão Team Menager</title>
     <link rel="stylesheet" href="{% static 'css/style.css' %}" />
     <style>
-      :root {
-        --accent: #0b74de;
-        --card-bg: #fff;
-        --muted: #666;
-      }
+ :root{
+  --bg-top: #030312;
+  --bg-bottom: #05102a;
+  --surface: rgba(255,255,255,0.02);
+  --card-bg: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  --accent: #00aaff;
+  --accent-2: #7b2cff;
+  --accent-3: #ffb100;
+  --muted: rgba(230,238,246,0.55);
+  --text: #e6eef6;
+  --glass-border: rgba(255,255,255,0.04);
+  --shadow: 0 12px 36px rgba(1,6,20,0.7);
+  --radius: 12px;
+}
 
-      body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:#f7f8fb; color:#111; margin:0; padding:18px; }
-      .container { max-width:1100px; margin:0 auto; }
+/* page */
+body{
+  margin:0;
+  padding:22px;
+  min-height:100vh;
+  font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
+  background:
+    radial-gradient(700px 400px at 10% 10%, rgba(123,44,255,0.06), transparent 12%),
+    radial-gradient(700px 400px at 90% 90%, rgba(0,170,255,0.04), transparent 12%),
+    linear-gradient(160deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+  color:var(--text);
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+}
 
-      .nav { margin-bottom:14px; }
-      .nav a { color:var(--accent); text-decoration:none; margin-right:8px; }
-      h2 { margin-top:0; }
+/* container keeps content centered */
+.container{
+  max-width:1100px;
+  margin:0 auto;
+  padding:18px;
+  text-align:center; /* center headings / buttons by default */
+}
 
-      .packs-grid { display:flex; gap:14px; flex-wrap:wrap; }
-      .pack-card { background:var(--card-bg); border:1px solid #e6e6e6; padding:12px; width:260px; border-radius:10px; box-shadow:0 2px 8px rgba(10,10,10,0.03); }
-      .pack-img { width:100%; height:140px; object-fit:cover; border-radius:6px; display:block; margin-bottom:10px; background:#eee; }
-      .pack-name { font-weight:700; margin-bottom:6px; font-size:16px; }
-      .pack-desc { font-size:13px; color:var(--muted); margin-bottom:8px; min-height:38px; }
-      .pack-price { font-size:14px; margin-bottom:10px; }
+/* NAV - centered */
+.nav{
+  display:flex;
+  justify-content:center;    /* centraliza os links horizontalmente */
+  align-items:center;
+  gap:12px;
+  margin-bottom:18px;
+  flex-wrap:wrap;
+  position:relative;
+  padding:6px 0;
+}
 
-      .btn { display:inline-block; padding:8px 12px; border-radius:8px; background:var(--accent); color:#fff; text-decoration:none; border:none; cursor:pointer; font-weight:600; }
-      .btn.ghost { background:transparent; color:var(--accent); border:1px solid var(--accent); padding:6px 10px; }
-      .muted { color:var(--muted); font-size:13px; }
+/* Text links inside nav */
+.nav a{
+  color:var(--accent);
+  text-decoration:none;
+  font-weight:700;
+  padding:8px 12px;
+  border-radius:10px;
+  transition: all .14s ease;
+  display:inline-block;
+}
 
-      .players-grid { display:flex; gap:10px; flex-wrap:wrap; margin-top:8px; }
-      .player-thumb { width:72px; text-align:center; font-size:12px; color:#222; }
-      .player-thumb img { width:72px; height:72px; object-fit:cover; border-radius:8px; display:block; margin:0 auto 6px; background:#f0f0f0; }
+/* Visual separator (|) handled by pseudo-element if you prefer no manual | in HTML) */
+/* If you keep ' | ' in the HTML you'll get separators anyway; this just gives consistent spacing. */
+.nav a + a::before{
+  content: "|";
+  margin-right:8px;
+  color: rgba(255,255,255,0.06);
+  margin-left:-12px;
+}
 
-      .pack-players { margin-top:10px; padding-top:10px; border-top:1px dashed #eee; }
-      .section-title { font-size:13px; margin:8px 0 6px 0; font-weight:700; color:#333; }
+/* active / hover states */
+.nav a:hover{ color:var(--accent-3); background: rgba(255,255,255,0.02); transform:translateY(-2px); }
 
-      .messages { list-style:none; padding:0; margin:6px 0 12px 0; }
-      .messages li { padding:8px 10px; border-radius:8px; margin-bottom:6px; background:#fff5d6; border:1px solid #f1d38a; }
+/* ensure logout link (if inside span) is centered too */
+.nav span{ display:inline-block; margin-left:6px; }
+.nav span a{ color:var(--accent); }
 
-      /* modal */
-      .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; z-index:9999; }
-      .modal { background:#fff; padding:18px; border-radius:10px; max-width:520px; width:92%; box-shadow:0 8px 30px rgba(10,10,10,0.2); }
-      .modal .row { display:flex; gap:12px; align-items:center; }
-      .modal img { width:120px; height:120px; object-fit:cover; border-radius:8px; }
+/* headings centered */
+h2{ color:var(--accent); margin:8px 0 14px; font-weight:900; }
+h3{ color:var(--muted); margin:14px 0; font-weight:800; }
 
-      footer { margin-top:28px; color:var(--muted); font-size:13px; text-align:center; }
-      @media (max-width:760px){
-        .packs-grid { justify-content:center; }
-        .pack-card { width:92%; }
-      }
+/* packs grid - centered cards */
+.packs-grid{
+  display:flex;
+  gap:18px;
+  flex-wrap:wrap;
+  justify-content:center; /* center the cards row */
+  margin-top:6px;
+}
+
+/* card */
+.pack-card{
+  width:260px;
+  background:var(--card-bg);
+  border:1px solid var(--glass-border);
+  border-radius:16px;
+  padding:14px;
+  box-shadow:var(--shadow);
+  transition:transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+}
+
+.pack-card:hover{
+  transform:translateY(-6px);
+  border-color: rgba(0,170,255,0.12);
+  box-shadow: 0 20px 48px rgba(0,10,30,0.7);
+}
+
+/* pack image */
+.pack-img{
+  width:100%;
+  height:150px;
+  object-fit:cover;
+  border-radius:10px;
+  display:block;
+  margin-bottom:10px;
+  background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(0,0,0,0.08));
+  border:1px solid rgba(255,255,255,0.02);
+}
+
+/* texts (centered inside card) */
+.pack-name{font-weight:800; font-size:1rem; color:var(--text); margin-bottom:6px; text-align:center;}
+.pack-desc{font-size:13px; color:var(--muted); margin-bottom:10px; min-height:40px; text-align:center;}
+.pack-price{font-size:14px; margin-bottom:10px; color:var(--text); text-align:center;}
+
+/* buttons centered and full width optional */
+.btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:10px 14px;
+  border-radius:12px;
+  border:none;
+  cursor:pointer;
+  font-weight:800;
+  text-decoration:none;
+  color:#001022;
+  background:linear-gradient(90deg,var(--accent),var(--accent-2));
+  box-shadow: 0 10px 26px rgba(0,170,255,0.08);
+  transition: transform .12s ease, filter .12s ease;
+}
+
+.btn:hover{ transform:translateY(-3px); filter:brightness(1.05); }
+
+.btn.ghost{
+  background:transparent;
+  color:var(--accent);
+  border:1px solid rgba(0,170,255,0.12);
+  box-shadow:none;
+}
+
+/* If you want the primary Buy button to be full width inside the card */
+.pack-card form button.btn{ width:100%; margin-top:10px; }
+
+/* small muted helper */
+.muted{color:var(--muted); font-size:13px;}
+
+/* players preview inside pack */
+.pack-players{margin-top:12px; padding-top:12px; border-top:1px dashed rgba(255,255,255,0.03);}
+.section-title{font-size:13px; font-weight:800; color:var(--text); margin-bottom:8px; text-align:left; padding-left:6px;}
+
+.players-grid{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  justify-content:center;
+}
+
+.player-thumb{
+  width:72px;
+  text-align:center;
+  font-size:12px;
+  color:var(--text);
+}
+
+.player-thumb img{
+  width:72px;
+  height:72px;
+  object-fit:cover;
+  border-radius:10px;
+  display:block;
+  margin:0 auto 6px;
+  border:1px solid rgba(255,255,255,0.02);
+  background: linear-gradient(180deg, rgba(255,255,255,0.01), rgba(0,0,0,0.04));
+  box-shadow: 0 6px 18px rgba(0,0,0,0.6);
+}
+
+/* messages list (success/info) centered */
+.messages{list-style:none; padding:0; margin:8px 0 12px 0; display:flex; flex-direction:column; align-items:center;}
+.messages li{
+  width:100%;
+  max-width:720px;
+  padding:10px 12px;
+  border-radius:10px;
+  margin-bottom:8px;
+  background: linear-gradient(90deg, rgba(0,255,136,0.06), rgba(123,44,255,0.03));
+  border:1px solid rgba(0,255,136,0.06);
+  color:var(--text);
+  font-weight:700;
+  text-align:center;
+}
+
+/* modal (centered) */
+.modal-backdrop{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.55);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:9999;
+  padding:20px;
+}
+
+.modal{
+  width:100%;
+  max-width:600px;
+  background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+  border-radius:14px;
+  padding:18px;
+  box-shadow: 0 28px 60px rgba(0,0,0,0.7);
+  border:1px solid rgba(255,255,255,0.03);
+}
+
+.modal .row{display:flex; gap:16px; align-items:center; justify-content:center;}
+.modal img{width:140px; height:140px; object-fit:cover; border-radius:12px; border:1px solid rgba(255,255,255,0.03);}
+
+/* modal text area */
+.modal .row div{flex:1;}
+.modal h3{margin:0; color:var(--accent); font-size:1.2rem; text-align:center;}
+.modal .muted{color:var(--muted); margin-top:6px; text-align:center;}
+
+/* footer */
+footer{margin-top:28px; color:var(--muted); font-size:13px; text-align:center;}
+
+/* accessibility focus */
+a:focus, button:focus{outline:2px solid rgba(0,170,255,0.14); outline-offset:3px;}
+
+/* responsive */
+@media (max-width:920px){
+  .packs-grid{justify-content:center;}
+  .pack-card{width:92%;}
+  .modal .row{flex-direction:column; align-items:flex-start;}
+  .modal img{width:120px; height:120px;}
+}
+
     </style>
   </head>
   <body>
@@ -171,7 +375,7 @@
       {% endif %}
 
       <footer>
-        <div>© Seu Jogo — Packs</div>
+        <div>© DGG Ultimate Brasileirao — Packs</div>
       </footer>
     </div>
   </body>

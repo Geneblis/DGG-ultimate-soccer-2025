@@ -6,7 +6,115 @@
     <title>Jogos — DGG's Ultimate Brasileirão Team Menager</title>
 
     <link rel="stylesheet" href="{% static 'css/style.css' %}" />
-    
+    <style>
+      /* CSS Dinâmico Inspirado em EA FC - Tema Escuro com Toques Coloridos e Gradientes */
+
+/* Variáveis CSS para dinamismo e facilidade de personalização */
+:root {
+  --primary-bg-start: #0a0a0a; /* Preto profundo para início do gradiente */
+  --primary-bg-end: #001a33; /* Azul navy escuro para fim do gradiente */
+  --secondary-bg: #001133; /* Azul mais escuro para cartões e zonas */
+  --accent-color: #00aaff; /* Azul brilhante para botões e destaques */
+  --success-color: #00ff88; /* Verde vibrante para mensagens de sucesso */
+  --error-color: #ff4444; /* Vermelho para mensagens de erro */
+  --text-color: #e6eef6; /* Branco azulado para texto principal */
+  --muted-text: #a0a0a0; /* Cinza para texto secundário */
+  --border-color: #333; /* Bordas escuras */
+  --hover-bg: rgba(0, 170, 255, 0.1); /* Fundo sutil para hover */
+  --card-shadow: 0 4px 8px rgba(0, 0, 0, 0.5); /* Sombras para profundidade */
+}
+
+/* Fundo do corpo com gradiente dinâmico */
+body {
+  font-family: 'Arial', sans-serif; /* Ou uma fonte mais esportiva como 'Roboto Condensed' se disponível */
+  margin: 2rem;
+  background: linear-gradient(135deg, var(--primary-bg-start) 0%, var(--primary-bg-end) 100%);
+  color: var(--text-color);
+  min-height: 100vh; /* Garante que o gradiente cubra toda a tela */
+  background-attachment: fixed; /* Efeito parallax sutil */
+}
+
+/* Container principal */
+.container {
+  max-width: 1200px; /* Aumentei ligeiramente para melhor layout */
+  margin: 0 auto;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.1); /* Overlay sutil para destacar conteúdo */
+  border-radius: 12px;
+  box-shadow: var(--card-shadow);
+}
+
+/* Navegação */
+.nav {
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.nav a {
+  color: var(--accent-color);
+  text-decoration: none;
+  font-weight: bold;
+  transition: color 0.3s ease;
+}
+
+.nav a:hover {
+  color: var(--success-color);
+}
+
+.float-right {
+  float: right; /* Mantém o comportamento original, mas pode ser ajustado para flex se necessário */
+}
+
+/* Títulos */
+h2 {
+  color: var(--accent-color);
+  margin-bottom: 20px;
+}
+
+/* Botões */
+.btn {
+  padding: 10px 16px;
+  background: var(--accent-color);
+  color: #fff;
+  border-radius: 8px;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  font-weight: bold;
+  transition: background 0.3s ease, transform 0.2s ease;
+  margin-right: 10px; /* Espaçamento entre botões */
+}
+
+.btn:hover {
+  background: #0088cc; /* Azul mais escuro no hover */
+  transform: scale(1.05);
+}
+
+/* Formulários */
+form {
+  display: inline-block;
+}
+
+/* Responsividade básica */
+@media (max-width: 768px) {
+  .nav {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .float-right {
+    float: none;
+    text-align: center;
+  }
+  .btn {
+    display: block;
+    margin-bottom: 10px;
+    margin-right: 0;
+  }
+}
+
+    </style>
   </head>
   <body>
     <div class="container clearfix">
