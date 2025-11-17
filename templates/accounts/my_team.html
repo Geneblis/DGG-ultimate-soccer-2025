@@ -7,25 +7,268 @@
     <title>Meu Time — DGG's Ultimate Brasileirão Team Menager</title>
     <link rel="stylesheet" href="{% static 'css/style.css' %}" />
     <style>
-      body { font-family: Arial, sans-serif; margin: 2rem; }
-      .container { max-width: 1100px; margin: 0 auto; }
-      .nav { margin-bottom: 12px; }
-      .card { padding: 12px; border: 1px solid #ddd; border-radius: 6px; background:#fff; }
-      .team-grid { display:flex; gap:12px; flex-wrap:wrap; margin-top:12px; }
-      .zone { flex:1; min-width:220px; background:#fbfbfb; border:1px solid #eee; padding:10px; border-radius:8px; }
-      .slot { border:1px dashed #ddd; padding:8px; border-radius:6px; margin-bottom:8px; display:flex; gap:8px; align-items:center; }
-      .slot img { width:56px; height:56px; object-fit:cover; border-radius:6px; background:#f0f0f0; }
-      .slot .meta { flex:1; }
-      .btn { padding:6px 10px; border-radius:6px; background:#0b74de; color:#fff; border:none; cursor:pointer; text-decoration:none; display:inline-block; }
-      .btn.ghost { background:transparent; color:#0b74de; border:1px solid #0b74de; }
-      .inventory { margin-top:18px; }
-      .player-card { border:1px solid #eee; padding:8px; border-radius:6px; display:flex; gap:10px; align-items:center; margin-bottom:8px; background:#fff; }
-      .player-card img{ width:80px; height:80px; object-fit:cover; border-radius:8px; }
-      .player-details { font-size:14px; }
-      .muted { color:#666; font-size:13px; }
-      .messages { margin-bottom:12px; }
-      .msg-success { background:#e6ffed; border:1px solid #b7f0c7; padding:8px; border-radius:6px; color:#04662b; margin-bottom:6px; }
-      .msg-error { background:#ffecec; border:1px solid #f3b5b5; padding:8px; border-radius:6px; color:#7a1a1a; margin-bottom:6px; }
+     /* CSS Dinâmico Inspirado em EA FC - Tema Escuro com Toques Coloridos e Gradientes */
+
+/* Variáveis CSS para dinamismo e facilidade de personalização */
+:root {
+  --primary-bg-start: #0a0a0a; /* Preto profundo para início do gradiente */
+  --primary-bg-end: #001a33; /* Azul navy escuro para fim do gradiente */
+  --secondary-bg: #001133; /* Azul mais escuro para cartões e zonas */
+  --accent-color: #00aaff; /* Azul brilhante para botões e destaques */
+  --success-color: #00ff88; /* Verde vibrante para mensagens de sucesso */
+  --error-color: #ff4444; /* Vermelho para mensagens de erro */
+  --text-color: #e6eef6; /* Branco azulado para texto principal */
+  --muted-text: #a0a0a0; /* Cinza para texto secundário */
+  --border-color: #333; /* Bordas escuras */
+  --hover-bg: rgba(0, 170, 255, 0.1); /* Fundo sutil para hover */
+  --card-shadow: 0 4px 8px rgba(0, 0, 0, 0.5); /* Sombras para profundidade */
+}
+
+/* Fundo do corpo com gradiente dinâmico */
+body {
+  font-family: 'Arial', sans-serif; /* Ou uma fonte mais esportiva como 'Roboto Condensed' se disponível */
+  margin: 2rem;
+  background: linear-gradient(135deg, var(--primary-bg-start) 0%, var(--primary-bg-end) 100%);
+  color: var(--text-color);
+  min-height: 100vh; /* Garante que o gradiente cubra toda a tela */
+  background-attachment: fixed; /* Efeito parallax sutil */
+}
+
+/* Container principal */
+.container {
+  max-width: 1200px; /* Aumentei ligeiramente para melhor layout */
+  margin: 0 auto;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.1); /* Overlay sutil para destacar conteúdo */
+  border-radius: 12px;
+  box-shadow: var(--card-shadow);
+}
+
+/* Navegação */
+.nav {
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.nav a {
+  color: var(--accent-color);
+  text-decoration: none;
+  font-weight: bold;
+  transition: color 0.3s ease;
+}
+
+.nav a:hover {
+  color: var(--success-color);
+}
+
+/* Cartões principais */
+.card {
+  padding: 20px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--secondary-bg);
+  box-shadow: var(--card-shadow);
+  margin-bottom: 20px;
+}
+
+/* Grade do time */
+.team-grid {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+  background: transparent; /* Removido fundo sólido para focar no gradiente geral */
+}
+
+/* Zonas (Goleiro, Defesa, etc.) */
+.zone {
+  flex: 1;
+  min-width: 250px; /* Aumentei para melhor responsividade */
+  background: var(--secondary-bg);
+  border: 1px solid var(--border-color);
+  padding: 15px;
+  border-radius: 12px;
+  box-shadow: var(--card-shadow);
+  transition: transform 0.3s ease;
+}
+
+.zone:hover {
+  transform: translateY(-5px); /* Efeito de elevação ao passar o mouse */
+}
+
+.zone h4 {
+  margin-top: 0;
+  color: var(--accent-color);
+  text-align: center;
+  font-size: 1.2em;
+}
+
+/* Slots dos jogadores */
+.slot {
+  border: 1px dashed var(--border-color);
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.05); /* Fundo sutil para destacar */
+  transition: background 0.3s ease;
+}
+
+.slot:hover {
+  background: var(--hover-bg);
+}
+
+.slot img {
+  width: 60px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--muted-text);
+  border: 2px solid var(--accent-color);
+}
+
+.slot .meta {
+  flex: 1;
+  font-size: 0.9em;
+}
+
+.slot .meta div:first-child {
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.slot .muted {
+  color: var(--muted-text);
+  font-size: 0.8em;
+}
+
+/* Botões */
+.btn {
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--accent-color);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  font-weight: bold;
+  transition: background 0.3s ease, transform 0.2s ease;
+}
+
+.btn:hover {
+  background: #0088cc; /* Azul mais escuro no hover */
+  transform: scale(1.05);
+}
+
+.btn.ghost {
+  background: transparent;
+  color: var(--accent-color);
+  border: 1px solid var(--accent-color);
+}
+
+.btn.ghost:hover {
+  background: var(--accent-color);
+  color: #fff;
+}
+
+/* Inventário */
+.inventory {
+  margin-top: 30px;
+  padding: 20px;
+  background: var(--secondary-bg);
+  border-radius: 12px;
+  box-shadow: var(--card-shadow);
+}
+
+.inventory h3 {
+  color: var(--accent-color);
+  margin-top: 0;
+}
+
+/* Cartões de jogadores no inventário */
+.player-card {
+  border: 1px solid var(--border-color);
+  padding: 15px;
+  border-radius: 12px;
+  display: flex;
+  gap: 15px;
+  align-items: center;
+  margin-bottom: 15px;
+  background: rgba(255, 255, 255, 0.05);
+  transition: background 0.3s ease;
+}
+
+.player-card:hover {
+  background: var(--hover-bg);
+}
+
+.player-card img {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 2px solid var(--accent-color);
+}
+
+.player-details {
+  font-size: 0.9em;
+  flex: 1;
+}
+
+.player-details div:first-child {
+  font-weight: 700;
+  color: var(--text-color);
+}
+
+.player-details .muted {
+  color: var(--muted-text);
+  font-size: 0.8em;
+}
+
+/* Mensagens */
+.messages {
+  margin-bottom: 20px;
+}
+
+.msg-success {
+  background: linear-gradient(90deg, var(--success-color) 0%, rgba(0, 255, 136, 0.2) 100%);
+  border: 1px solid var(--success-color);
+  padding: 12px;
+  border-radius: 8px;
+  color: #000; /* Texto escuro para contraste */
+  margin-bottom: 10px;
+  box-shadow: var(--card-shadow);
+}
+
+.msg-error {
+  background: linear-gradient(90deg, var(--error-color) 0%, rgba(255, 68, 68, 0.2) 100%);
+  border: 1px solid var(--error-color);
+  padding: 12px;
+  border-radius: 8px;
+  color: #fff;
+  margin-bottom: 10px;
+  box-shadow: var(--card-shadow);
+}
+
+/* Responsividade básica */
+@media (max-width: 768px) {
+  .team-grid {
+    flex-direction: column;
+  }
+  .zone {
+    min-width: 100%;
+  }
+  .nav {
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
     </style>
   </head>
   <body>
