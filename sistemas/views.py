@@ -1400,18 +1400,18 @@ def _compute_team_composition_strength(team_slots):
         "neutral": neutral_power,
     }
 
+
 def _simulate_match(user_team_slots, ai_team_slots, seed=None):
     """
-    Simula 90 minutos (45+45). Retorna dict com events(list), score_home, score_away, home_is_user boolean.
-    - Decide casa aleatoriamente (50/50).
-    - Em cada minuto: decide posse com base em attack vs defense, gera evento textual e marca gols conforme probabilidades.
-    - A lista 'events' terá dicionários: {minute, half, text, team_in_possession, event_type}
+    Simula 90 minutos (45+45) — versão com textos mais variados e uso dos nomes reais
+    dos jogadores (quando disponíveis). Mantém a lógica de posse, chance de finalização
+    e marcação de gols igual à versão anterior; apenas melhora as frases e insere nomes.
     """
     if seed is None:
         seed = uuid.uuid4().hex
     rnd = random.Random(seed)
 
-    # Decide quem é casa
+    # Decide casa
     home_is_user = rnd.choice([True, False])
 
     # Map home/away slots
@@ -1429,114 +1429,180 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
     home_strength = _compute_team_composition_strength(home_slots)
     away_strength = _compute_team_composition_strength(away_slots)
 
-    # seed info in meta
     meta = {"seed": str(seed), "home_is_user": home_is_user}
 
     events = []
     score_home = 0
     score_away = 0
 
-    # função auxiliar para gerar textos variados simples
-    def _text_progression(team_label, action):
-        # small set of templates
+    # lista de nomes genéricos como fallback
+    GENERIC_NAMES = ["Sicrano", "Fulano", "Beltrano", "Zezinho", "Marquinhos", "Ronaldo", "Pereira", "Silva"]
+
+    # fun helpers
+    def _get_name(player_snap):
+        try:
+            if not player_snap:
+                return rnd.choice(GENERIC_NAMES)
+            name = player_snap.get("name") or player_snap.get("id") or ""
+            if name and str(name).strip():
+                return str(name)
+        except Exception:
+            pass
+        return rnd.choice(GENERIC_NAMES)
+
+    def _flatten_zone_players(slots_dict):
+        # retorna lista de snapshots (gk é single, def/mid/off listas)
+        out = []
+        if not slots_dict:
+            return out
+        gk = slots_dict.get("gk")
+        if isinstance(gk, dict) and gk:
+            out.append(gk)
+        for z in ("def", "mid", "off"):
+            for p in (slots_dict.get(z) or []):
+                if isinstance(p, dict) and p:
+                    out.append(p)
+        return out
+
+    def _choose_from_zone_prefer(zone_list, prefer_order):
+        # prefer_order é lista de zonas strings: ["off","mid","def"]
+        # zone_list é o slots dict (com keys gk,def,mid,off)
+        for zone in prefer_order:
+            lst = zone_list.get(zone) or []
+            for p in lst:
+                if isinstance(p, dict) and p:
+                    return p
+        # fallback: qualquer jogador disponível
+        flat = _flatten_zone_players(zone_list)
+        if flat:
+            return rnd.choice(flat)
+        return None
+
+    # função de geração textual mais rica que escolhe jogadores reais
+    def _text_progression(team_label, action, attacking_slots=None, defending_slots=None):
+        # attacking_slots/defending_slots são os dicts com 'gk','def','mid','off'
+        if attacking_slots is None:
+            attacking_slots = {}
+        if defending_slots is None:
+            defending_slots = {}
+
+        # nomes úteis
+        attacker_forward = _choose_from_zone_prefer(attacking_slots, ["off", "mid", "def"])
+        attacker_mid = _choose_from_zone_prefer(attacking_slots, ["mid", "off", "def"])
+        defender = _choose_from_zone_prefer(defending_slots, ["def", "mid", "off"])
+        keeper = (defending_slots.get("gk") if isinstance(defending_slots.get("gk"), dict) else None) or {}
+        scorer = attacker_forward
+        assister = attacker_mid
+
+        attacker_name = _get_name(attacker_forward)
+        mid_name = _get_name(attacker_mid)
+        defender_name = _get_name(defender)
+        keeper_name = _get_name(keeper)
+        scorer_name = _get_name(scorer)
+        assister_name = _get_name(assister)
+
         templates = {
             "start_possession": [
-                f"Time {team_label} pegou a bola!",
-                f"{team_label} iniciou a jogada.",
-                f"{team_label} avança com a bola."
+                f"{team_label} pegou a bola com {attacker_name} e começa a trabalhar a jogada.",
+                f"{team_label} tem a posse — {attacker_name} conduz a bola.",
+                f"{attacker_name} inicia a movimentação para {team_label}."
             ],
             "advance": [
-                f"Eles avançam em direção ao gol...",
-                f"{team_label} progride pelo campo.",
-                f"Jogadores do {team_label} avançam pelo corredor."
+                f"{team_label} avança: {attacker_name} parte pelo corredor e procura a profundidade.",
+                f"{team_label} progride em velocidade — {attacker_name} tentando furar a defesa.",
+                f"{attacker_name} acelera e aproxima a equipe do gol adversário."
             ],
             "intercepted": [
-                f"São interceptados!",
-                f"A jogada é cortada pela defesa adversária.",
-                f"Passe falho e a bola volta para o outro time."
+                f"A jogada é interrompida: {defender_name} faz o corte e recupera a bola.",
+                f"{defender_name} antecipa o passe e intercepta a ação do {team_label}.",
+                f"Passe perigoso cortado por {defender_name} — contra-ataque iniciado."
             ],
             "offside": [
-                f"{team_label} foi impedido!",
-                f"Impedimento marcado contra {team_label}.",
+                f"{scorer_name} foi flagrado em impedimento — jogada anulada.",
+                f"Impedimento: {scorer_name} estava adiantado na linha defensiva."
             ],
             "cross": [
-                f"Sicrano faz um cruzamento...",
-                f"Cruzamento na área do adversário.",
+                f"{attacker_name} faz um cruzamento fechado — procura {assister_name} na área.",
+                f"Cruzamento na medida de {attacker_name}... tem alguém na área!",
+                f"{attacker_name} levanta na área; atenção para a cabeçada."
             ],
             "shot": [
-                f"Finalização! Vamos ver...",
-                f"Tiro a gol! Que perigo!",
+                f"{attacker_name} arma a finalização — é perigoso!",
+                f"{team_label} tenta o chute com {attacker_name} — preparou, bateu...",
+                f"{attacker_name} arrisca de fora da área."
             ],
             "goal": [
-                f"GOL! GOL! GOL! DO {team_label}!!!",
-                f"É GOL de {team_label}! Que jogada!",
+                f"É GOL! {scorer_name} coloca para o fundo da rede! ({team_label})",
+                f"GOOOL de {team_label}! Finalização de {scorer_name}, assistência de {assister_name}."
             ],
             "miss": [
-                f"Perdeu a chance por pouco!",
-                f"Finalização pra fora.",
+                f"{attacker_name} perde a oportunidade por pouco.",
+                f"Na trave! {attacker_name} não alcança o gol por centímetros."
             ],
             "foul": [
-                f"Falta cometida — bola parada.",
-                f"Falta dura, cartão amarelo possível."
+                f"Falta marcada em {attacker_name} — bola parada para {team_label}.",
+                f"Falta dura cometida — atenção para cartão, o árbitro observa a jogada."
             ],
             "keeper_save": [
-                f"O goleiro defende! Que defesa!",
-                f"Defesa espetacular do goleiro."
+                f"{keeper_name} salva! Defesa sensacional do goleiro.",
+                f"Que defesa de {keeper_name}! Impulsionou a bola para escanteio."
+            ],
+            "dribble": [
+                f"Disputa no meio-campo entre {attacker_name} e {defender_name}.",
+                f"Rola a troca de passes no centro; {mid_name} tentando achar uma brecha."
             ]
         }
-        bucket = templates.get(action) or ["Aconteceu algo..."]
+        bucket = templates.get(action) or [f"Aconteceu algo com {attacker_name}..."]
         return rnd.choice(bucket)
 
-    # simulate 90 minutes (1..90). We'll flag half: 1-45 first, 46-90 second.
+    # simulate 90 minutes
     for minute in range(1, 91):
         half = 1 if minute <= 45 else 2
 
-        # Atualiza forças dinâmicas (poderia variar durante jogo; por simplicidade, recompute cada minuto)
+        # recompute strengths
         home_strength = _compute_team_composition_strength(home_slots)
         away_strength = _compute_team_composition_strength(away_slots)
 
-        # chance de posse para home = home.attack / (home.attack + away.defense)
         home_attack = home_strength["attack"] + 1e-6
         away_defense = away_strength["defense"] + 1e-6
         prob_home_possession = home_attack / (home_attack + away_defense)
 
         possession_is_home = rnd.random() < prob_home_possession
 
-        # label e strengths para o time em posse
         attacking_label = home_label if possession_is_home else away_label
         defending_label = away_label if possession_is_home else home_label
         attacking_strength = home_strength if possession_is_home else away_strength
         defending_strength = away_strength if possession_is_home else home_strength
 
+        attacking_slots = home_slots if possession_is_home else away_slots
+        defending_slots = away_slots if possession_is_home else home_slots
+
         # base progression event
         if rnd.random() < 0.65:
-            text = _text_progression(attacking_label, "start_possession")
+            text = _text_progression(attacking_label, "start_possession", attacking_slots, defending_slots)
             event_type = "possession_start"
         else:
-            text = _text_progression(attacking_label, "advance")
+            text = _text_progression(attacking_label, "advance", attacking_slots, defending_slots)
             event_type = "advance"
 
-        # chance to get to a shot roughly proportional to (attack / (attack + neutral + defense*0.5))
+        # chance to shot
         shot_chance_denom = attacking_strength["attack"] + attacking_strength["neutral"]*0.5 + defending_strength["defense"]*0.5 + 1e-6
-        shot_probability = (attacking_strength["attack"] / shot_chance_denom) * 0.25  # scaled
-        # small random modulation
+        shot_probability = (attacking_strength["attack"] / shot_chance_denom) * 0.25
         shot_probability *= rnd.uniform(0.8, 1.2)
 
         did_shot = rnd.random() < shot_probability
 
         if did_shot:
-            # describe shot progression
-            text += " " + _text_progression(attacking_label, "shot")
+            text += " " + _text_progression(attacking_label, "shot", attacking_slots, defending_slots)
             event_type = "shot"
-            # compute goal probability: depends on attack power vs opponent GK+defense
+
             shot_power = attacking_strength["attack"] * rnd.uniform(0.6, 1.4)
             keeper_power = (defending_strength["gk"] * 1.8) + (defending_strength["def"] * 0.6)
             goal_probability = shot_power / (shot_power + keeper_power + 1e-6)
-            goal_probability = max(0.02, min(0.7, goal_probability * 0.7))  # clamp and scale
+            goal_probability = max(0.02, min(0.7, goal_probability * 0.7))
 
             if rnd.random() < goal_probability:
-                # GOAL!
-                text += " " + _text_progression(attacking_label, "goal")
+                text += " " + _text_progression(attacking_label, "goal", attacking_slots, defending_slots)
                 event_type = "goal"
                 if possession_is_home:
                     score_home += 1
@@ -1544,31 +1610,28 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
                     score_away += 1
             else:
                 # saved or missed
-                # determine saved vs miss by comparing shot_power vs keeper
                 if rnd.random() < (keeper_power / (shot_power + keeper_power + 1e-6)):
-                    text += " " + _text_progression(attacking_label, "keeper_save")
+                    text += " " + _text_progression(attacking_label, "keeper_save", attacking_slots, defending_slots)
                     event_type = "keeper_save"
                 else:
-                    text += " " + _text_progression(attacking_label, "miss")
+                    text += " " + _text_progression(attacking_label, "miss", attacking_slots, defending_slots)
                     event_type = "miss"
-
         else:
-            # no shot: maybe intercepted, offside, cross, foul
             r = rnd.random()
             if r < 0.12:
-                text += " " + _text_progression(attacking_label, "intercepted")
+                text += " " + _text_progression(attacking_label, "intercepted", attacking_slots, defending_slots)
                 event_type = "intercepted"
             elif r < 0.20:
-                text += " " + _text_progression(attacking_label, "offside")
+                text += " " + _text_progression(attacking_label, "offside", attacking_slots, defending_slots)
                 event_type = "offside"
             elif r < 0.35:
-                text += " " + _text_progression(attacking_label, "cross")
+                text += " " + _text_progression(attacking_label, "cross", attacking_slots, defending_slots)
                 event_type = "cross"
             elif r < 0.45:
-                text += " " + _text_progression(attacking_label, "foul")
+                text += " " + _text_progression(attacking_label, "foul", attacking_slots, defending_slots)
                 event_type = "foul"
             else:
-                text += " Segue a disputa no meio de campo."
+                text += " " + _text_progression(attacking_label, "dribble", attacking_slots, defending_slots)
                 event_type = "dribble"
 
         events.append({
@@ -1581,13 +1644,14 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
             "score_away": score_away
         })
 
-    # final meta: winner
+    # final meta
     if score_home > score_away:
         winner = "home"
     elif score_away > score_home:
         winner = "away"
     else:
         winner = "draw"
+
     result_meta = {"score_home": score_home, "score_away": score_away, "winner": winner}
     return {
         "events": events,
@@ -1596,6 +1660,7 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
         "winner": winner,
         "meta": meta
     }
+
 
 # ----------------- Views expostas -----------------
 
