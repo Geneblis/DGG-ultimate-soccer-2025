@@ -1403,20 +1403,19 @@ def _compute_team_composition_strength(team_slots):
 
 def _simulate_match(user_team_slots, ai_team_slots, seed=None):
     """
-    Simula 90 minutos (45+45) — versão com narração mais humana e:
-    - Mostra explicitamente qual time está atacando (prefixo "[ATAQUE]").
-    - Não usa nomes genéricos; se o snapshot não tiver 'name' usa fallback "Jogador #xxxx".
-    - Mantém a mesma lógica de probabilidades, placar e estrutura de eventos.
-    (Comentários explicativos concentrados no topo conforme pedido.)
+    Simula 90 minutos (45+45) — versão que gera 'micro-eventos' por minuto
+    (ex.: posse -> finalização -> resultado) mas mantém apenas um registro
+    por minuto no array `events`. O prefixo do minuto aparece somente na
+    primeira frase daquele minuto para evitar repetir "23' — ..." várias vezes.
     """
     if seed is None:
         seed = uuid.uuid4().hex
     rnd = random.Random(seed)
 
-    # Decide casa
+    # decide casa
     home_is_user = rnd.choice([True, False])
 
-    # Map home/away slots
+    # map home / away
     if home_is_user:
         home_slots = user_team_slots
         away_slots = ai_team_slots
@@ -1428,9 +1427,6 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
         home_label = "Adversário"
         away_label = "Seu Time"
 
-    home_strength = _compute_team_composition_strength(home_slots)
-    away_strength = _compute_team_composition_strength(away_slots)
-
     meta = {"seed": str(seed), "home_is_user": home_is_user}
 
     events = []
@@ -1439,16 +1435,13 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
 
     # ---------- helpers ----------
     def _get_name(player_snap):
-        """
-        Retorna o nome real se existir; se não houver, gera 'Jogador #XXXX' a partir do id.
-        Não usa nomes genéricos tipo 'Sicrano'/'Fulano'.
-        """
+        """Retorna nome real se existir; senão 'Jogador #XXXX' derivado do id."""
         try:
             if not player_snap:
                 return "Jogador #????"
-            name = player_snap.get("name")
-            if name and str(name).strip():
-                return str(name)
+            name_val = player_snap.get("name")
+            if name_val and str(name_val).strip():
+                return str(name_val)
             pid = str(player_snap.get("id") or player_snap.get("object_id") or "")
             short = pid[-4:] if pid else "????"
             return f"Jogador #{short}"
@@ -1462,8 +1455,8 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
         gk = slots_dict.get("gk")
         if isinstance(gk, dict) and gk:
             out.append(gk)
-        for z in ("def", "mid", "off"):
-            for p in (slots_dict.get(z) or []):
+        for zone in ("def", "mid", "off"):
+            for p in (slots_dict.get(zone) or []):
                 if isinstance(p, dict) and p:
                     out.append(p)
         return out
@@ -1479,92 +1472,100 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
             return rnd.choice(flat)
         return None
 
-    def _text_progression(team_label, action, attacking_slots=None, defending_slots=None, minute=None):
-        """
-        Gera texto. Adiciona prefixo de minuto e, para ações ofensivas, um marcador claro
-        indicando qual time está atacando: ex. "23' — [ATAQUE Seu Time] ...".
-        """
-        if attacking_slots is None:
-            attacking_slots = {}
-        if defending_slots is None:
-            defending_slots = {}
+    # templates base (frases sem prefixo do minuto)
+    TEMPLATES = {
+        "start_possession": [
+            "{attack_marker}{attacker} conduz a bola e começa a construção de jogada.",
+            "{attack_marker}{team} com posse — {attacker} assume a articulação.",
+            "{attack_marker}{attacker} inicia a movimentação ofensiva."
+        ],
+        "advance": [
+            "{attack_marker}{attacker} avança pelo corredor e busca o espaço.",
+            "{attack_marker}{team} empurra para frente — {attacker} em progressão.",
+            "{attack_marker}{attacker} infiltra; chance se formando."
+        ],
+        "intercepted": [
+            "{defender} intercepta e corta a trama ofensiva.",
+            "{defender} rouba e segura a transição."
+        ],
+        "offside": [
+            "{scorer} em impedimento — bandeira levantada.",
+            "Impedimento anula a jogada de {scorer}."
+        ],
+        "cross": [
+            "{attack_marker}{attacker} cruza na área — atenção!",
+            "{attack_marker}Cruzamento de {attacker}, alguém aparece para concluir."
+        ],
+        "shot": [
+            "{attack_marker}{attacker} arma a finalização — é perigoso!",
+            "{attack_marker}{team} tenta o chute com {attacker} — bateu!"
+        ],
+        "goal": [
+            "{attack_marker}GOL! {scorer} balança as redes! ({team})",
+            "{attack_marker}GOAL de {scorer}! Assistência de {assister}."
+        ],
+        "miss": [
+            "{attacker} erra por pouco — escapou por centímetros.",
+            "Na trave! {attacker} lamenta a chance perdida."
+        ],
+        "foul": [
+            "Falta em {attacker} — bola parada para {team}.",
+            "Falta dura, juiz sinaliza e o jogo para."
+        ],
+        "keeper_save": [
+            "{keeper} faz uma defesa sensacional!",
+            "Que defesa de {keeper}! Escanteio para os atacantes."
+        ],
+        "dribble": [
+            "Disputa no meio entre {mid} e {defender}.",
+            "Troca de passes no centro; jogo cadenciado."
+        ]
+    }
 
+    def _render_template(action, minute_prefix, team_label, attacking_slots, defending_slots, include_minute):
+        """
+        Gera uma frase para 'action'. include_minute controla se adiciona
+        o prefixo do minuto (ex: \"23' — \") — normalmente só é True para a
+        primeira frase do minuto.
+        """
         attacker_forward = _choose_from_zone_prefer(attacking_slots, ["off", "mid", "def"])
         attacker_mid = _choose_from_zone_prefer(attacking_slots, ["mid", "off", "def"])
         defender = _choose_from_zone_prefer(defending_slots, ["def", "mid", "off"])
-        keeper = (defending_slots.get("gk") if isinstance(defending_slots.get("gk"), dict) else None) or {}
-        scorer = attacker_forward
-        assister = attacker_mid
+        keeper_snap = (defending_slots.get("gk") if isinstance(defending_slots.get("gk"), dict) else None) or {}
 
         attacker_name = _get_name(attacker_forward)
         mid_name = _get_name(attacker_mid)
         defender_name = _get_name(defender)
-        keeper_name = _get_name(keeper)
-        scorer_name = _get_name(scorer)
-        assister_name = _get_name(assister)
+        keeper_name = _get_name(keeper_snap)
+        scorer_name = _get_name(attacker_forward)
+        assister_name = _get_name(attacker_mid)
 
-        # prefixo de minuto
-        minute_prefix = (f"{minute}' — " if minute is not None else "")
-
-        # Para ações ofensivas adicionamos o marcador [ATAQUE <team_label>]
         attack_actions = {"start_possession", "advance", "shot", "cross", "goal"}
         attack_marker = f"[ATAQUE {team_label}] " if action in attack_actions else ""
 
-        templates = {
-            "start_possession": [
-                f"{minute_prefix}{attack_marker}{attacker_name} conduz a bola e inicia a construção de jogada.",
-                f"{minute_prefix}{attack_marker}{team_label} com posse — {attacker_name} assume a articulação.",
-                f"{minute_prefix}{attack_marker}{attacker_name} começa a movimentação ofensiva."
-            ],
-            "advance": [
-                f"{minute_prefix}{attack_marker}{attacker_name} avança pelo corredor, buscand o espaço.",
-                f"{minute_prefix}{attack_marker}{team_label} empurra para frente — {attacker_name} em progressão.",
-                f"{minute_prefix}{attack_marker}{attacker_name} infiltra; chance se formando."
-            ],
-            "intercepted": [
-                f"{minute_prefix}{defender_name} intercepta e corta a trama ofensiva.",
-                f"{minute_prefix}{defender_name} rouba e segura a transição."
-            ],
-            "offside": [
-                f"{minute_prefix}{scorer_name} em impedimento — bandeira levantada.",
-                f"{minute_prefix}Impedimento anula a jogada de {scorer_name}."
-            ],
-            "cross": [
-                f"{minute_prefix}{attack_marker}{attacker_name} cruza fechado na área — atenção!",
-                f"{minute_prefix}{attack_marker}Cruzamento de {attacker_name}, alguém aparece para concluir."
-            ],
-            "shot": [
-                f"{minute_prefix}{attack_marker}{attacker_name} finaliza — é perigoso!",
-                f"{minute_prefix}{attack_marker}{team_label} tenta o chute com {attacker_name}."
-            ],
-            "goal": [
-                f"{minute_prefix}{attack_marker}GOL! {scorer_name} balança as redes! ({team_label})",
-                f"{minute_prefix}{attack_marker}GOAL de {scorer_name}! Assistência de {assister_name}."
-            ],
-            "miss": [
-                f"{minute_prefix}{attacker_name} erra por pouco — escapou por centímetros.",
-                f"{minute_prefix}Na trave! {attacker_name} lamenta a chance perdida."
-            ],
-            "foul": [
-                f"{minute_prefix}Falta em {attacker_name} — bola parada para {team_label}.",
-                f"{minute_prefix}Falta dura, juiz sinaliza e o jogo para."
-            ],
-            "keeper_save": [
-                f"{minute_prefix}{keeper_name} faz uma defesa sensacional!",
-                f"{minute_prefix}Que defesa de {keeper_name}! Escanteio para os atacantes."
-            ],
-            "dribble": [
-                f"{minute_prefix}Disputa no meio entre {mid_name} e {defender_name}.",
-                f"{minute_prefix}Troca de passes no centro; jogo cadenciado."
-            ]
-        }
-        bucket = templates.get(action) or [f"{minute_prefix}{attack_marker}Aconteceu algo com {attacker_name}..."]
-        return rnd.choice(bucket)
+        template_list = TEMPLATES.get(action) or ["Aconteceu algo..."]
+        chosen = rnd.choice(template_list)
 
-    # ---------- simulate 90 minutes ----------
+        # montar frase (sem minute prefixo aqui)
+        sentence = chosen.format(
+            attack_marker=attack_marker,
+            attacker=attacker_name,
+            mid=mid_name,
+            defender=defender_name,
+            keeper=keeper_name,
+            scorer=scorer_name,
+            assister=assister_name,
+            team=team_label
+        )
+        if include_minute and minute_prefix:
+            return f"{minute_prefix}{sentence}"
+        return sentence
+
+    # ---------- simulate 90 minutes (micro-eventos por minuto, 1 registro por minuto) ----------
     for minute in range(1, 91):
         half = 1 if minute <= 45 else 2
 
+        # recompute strengths a cada minuto (mantém dinâmica)
         home_strength = _compute_team_composition_strength(home_slots)
         away_strength = _compute_team_composition_strength(away_slots)
 
@@ -1582,13 +1583,19 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
         attacking_slots = home_slots if possession_is_home else away_slots
         defending_slots = away_slots if possession_is_home else home_slots
 
-        if rnd.random() < 0.65:
-            text = _text_progression(attacking_label, "start_possession", attacking_slots, defending_slots, minute)
-            event_type = "possession_start"
-        else:
-            text = _text_progression(attacking_label, "advance", attacking_slots, defending_slots, minute)
-            event_type = "advance"
+        minute_prefix = f"{minute}' — "
 
+        # primeiro micro-evento: posse ou avanço (mantido similar ao antigo)
+        if rnd.random() < 0.65:
+            first_action = "start_possession"
+        else:
+            first_action = "advance"
+
+        sentences = []
+        # primeira frase com prefixo do minuto
+        sentences.append(_render_template(first_action, minute_prefix, attacking_label, attacking_slots, defending_slots, include_minute=True))
+
+        # calcular probabilidade de finalização (mesma fórmula antiga)
         shot_chance_denom = attacking_strength["attack"] + attacking_strength["neutral"] * 0.5 + defending_strength["defense"] * 0.5 + 1e-6
         shot_probability = (attacking_strength["attack"] / shot_chance_denom) * 0.25
         shot_probability *= rnd.uniform(0.8, 1.2)
@@ -1596,50 +1603,55 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
         did_shot = rnd.random() < shot_probability
 
         if did_shot:
-            text += " " + _text_progression(attacking_label, "shot", attacking_slots, defending_slots, minute)
-            event_type = "shot"
+            # adicionar frase de finalização (sem repetir minuto)
+            sentences.append(_render_template("shot", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
 
+            # resolver resultado único da finalização
             shot_power = attacking_strength["attack"] * rnd.uniform(0.6, 1.4)
             keeper_power = (defending_strength["gk"] * 1.8) + (defending_strength["def"] * 0.6)
             goal_probability = shot_power / (shot_power + keeper_power + 1e-6)
             goal_probability = max(0.02, min(0.7, goal_probability * 0.7))
 
             if rnd.random() < goal_probability:
-                text += " " + _text_progression(attacking_label, "goal", attacking_slots, defending_slots, minute)
+                # gol
+                sentences.append(_render_template("goal", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
                 event_type = "goal"
                 if possession_is_home:
                     score_home += 1
                 else:
                     score_away += 1
             else:
-                if rnd.random() < (keeper_power / (shot_power + keeper_power + 1e-6)):
-                    text += " " + _text_progression(attacking_label, "keeper_save", attacking_slots, defending_slots, minute)
+                # salva ou erra
+                saved_chance = keeper_power / (shot_power + keeper_power + 1e-6)
+                if rnd.random() < saved_chance:
+                    sentences.append(_render_template("keeper_save", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
                     event_type = "keeper_save"
                 else:
-                    text += " " + _text_progression(attacking_label, "miss", attacking_slots, defending_slots, minute)
+                    sentences.append(_render_template("miss", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
                     event_type = "miss"
         else:
+            # sem finalização: escolher 1 micro-evento de follow-up (um só)
             r = rnd.random()
             if r < 0.12:
-                text += " " + _text_progression(attacking_label, "intercepted", attacking_slots, defending_slots, minute)
-                event_type = "intercepted"
+                follow = "intercepted"
             elif r < 0.20:
-                text += " " + _text_progression(attacking_label, "offside", attacking_slots, defending_slots, minute)
-                event_type = "offside"
+                follow = "offside"
             elif r < 0.35:
-                text += " " + _text_progression(attacking_label, "cross", attacking_slots, defending_slots, minute)
-                event_type = "cross"
+                follow = "cross"
             elif r < 0.45:
-                text += " " + _text_progression(attacking_label, "foul", attacking_slots, defending_slots, minute)
-                event_type = "foul"
+                follow = "foul"
             else:
-                text += " " + _text_progression(attacking_label, "dribble", attacking_slots, defending_slots, minute)
-                event_type = "dribble"
+                follow = "dribble"
+            sentences.append(_render_template(follow, None, attacking_label, attacking_slots, defending_slots, include_minute=False))
+            event_type = follow
+
+        # juntar frases sem repetir minute prefix (juntamos com espaço)
+        full_text = " ".join(sentences)
 
         events.append({
             "minute": minute,
             "half": half,
-            "text": text,
+            "text": full_text,
             "possession_home": possession_is_home,
             "event_type": event_type,
             "score_home": score_home,
@@ -1654,7 +1666,6 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
     else:
         winner = "draw"
 
-    result_meta = {"score_home": score_home, "score_away": score_away, "winner": winner}
     return {
         "events": events,
         "score_home": score_home,
@@ -1662,7 +1673,6 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
         "winner": winner,
         "meta": meta
     }
-
 
 # ----------------- Views expostas -----------------
 
