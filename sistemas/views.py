@@ -37,6 +37,8 @@ def _flag_url_for_country(country_code_or_name):
     MAP = {
         "venezuela": "ve",
         "denmark": "dk",
+        "ecuador": "ec",
+        "italy": "it",
         "netherlands": "nl",
         "brazil": "br",
         "argentina": "ar",
