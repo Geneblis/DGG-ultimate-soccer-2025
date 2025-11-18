@@ -35,13 +35,15 @@ def _flag_url_for_country(country_code_or_name):
     if len(cc) == 2 and cc.isalpha():
         return f"https://flagcdn.com/h40/{cc}.png"
     MAP = {
+        "venezuela": "ve",
+        "denmark": "dk",
+        "netherlands": "nl",
         "brazil": "br",
         "argentina": "ar",
         "uruguay": "uy",
         "chile": "cl",
         "portugal": "pt",
         "spain": "es",
-        "espanha": "es",
         "colombia": "co",
         "paraguay": "py",
         "bolivia": "bo",
