@@ -7,28 +7,138 @@
     <title>Home — DGG's Ultimate Brasileirão Team Menager</title>
 
     <link rel="stylesheet" href="{% static 'css/style.css' %}" />
+
     <style>
-    
+/* ===================== */
+/*  TEMA DO SITE 2 AQUI  */
+/* ===================== */
+
+:root {
+  --primary-bg-start: #0a0a0a;
+  --primary-bg-end: #001a33;
+  --secondary-bg: #001133;
+  --accent-color: #00aaff;
+  --success-color: #00ff88;
+  --error-color: #ff4444;
+  --text-color: #e6eef6;
+  --muted-text: #a0a0a0;
+  --border-color: #333;
+  --hover-bg: rgba(0, 170, 255, 0.1);
+  --card-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+}
+
+
+/* Fundo: gradiente + logo como layer *acima* (via ::before) */
+body {
+  font-family: 'Arial', sans-serif;
+  margin: 2rem;
+  color: var(--text-color);
+  min-height: 100vh;
+
+  /* só o gradiente no background normal */
+  background: linear-gradient(135deg, var(--primary-bg-start) 0%, var(--primary-bg-end) 100%);
+  background-attachment: fixed;
+  position: relative; /* necessário para o ::before posicionar-se */
+}
+
+/* logo por cima do gradiente - não interfere em cliques (pointer-events:none) */
+body::before {
+  content: "";
+  position: fixed;      /* fica fixa na viewport */
+  inset: 0;             /* ocupa toda a tela */
+  display: block;
+  pointer-events: none; /* evita bloquear cliques */
+  background-image: url("{% static 'webmedia/home/dgg_logo.png' %}");
+  background-repeat: no-repeat;
+  background-position: center; /* centraliza */
+  background-size: 40%;        /* ajuste: 40% da largura da viewport */
+  opacity: 0.15;               /* ajuste a visibilidade da logo */
+  mix-blend-mode: normal;      /* ou experimente 'screen' / 'soft-light' / 'overlay' */
+  z-index: 0;                  /* abaixo do conteúdo que terá z-index>0 */
+}
+
+/* garante que o container fique acima da logo (visível) */
+.container {
+  position: relative;
+  z-index: 1;
+  background: rgba(0, 0, 20, 0.65);
+}
+
+
+/* Container */
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px;
+  background: rgba(0, 0, 20, 0.65);
+  border-radius: 12px;
+  box-shadow: var(--card-shadow);
+}
+
+/* Navbar */
+.nav {
+  margin-bottom: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.nav a {
+  color: var(--accent-color);
+  font-weight: bold;
+  text-decoration: none;
+  transition: color 0.3s ease;
+}
+
+.nav a:hover {
+  color: var(--success-color);
+}
+
+.float-right {
+  float: right;
+}
+
+/* Títulos */
+h2 {
+  color: var(--accent-color);
+  margin-bottom: 20px;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+  .nav {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .float-right {
+    float: none;
+    text-align: center;
+  }
+}
+
     </style>
   </head>
+
   <body>
     <div class="container clearfix">
       <div class="nav">
-        <a href="{% url 'my_team' %}">My Team</a> |
+        <a href="{% url 'my_team' %}">Meu Time</a> |
         <a href="{% url 'store' %}">Loja</a> |
         <a href="{% url 'matches' %}">Jogos</a> |
         <span class="float-right"><a href="{% url 'logout' %}">Logout</a></span>
       </div>
 
       <h2>Home</h2>
+      {% if messages %}
+        {% for m in messages %}
+        <div style="color: red">{{ m }}</div>
+        {% endfor %}
+      {% endif %}
 
-      {% if messages %} {% for m in messages %}
-      <div style="color: red">{{ m }}</div>
-      {% endfor %} {% endif %}
-
-      <p>Welcome, <strong>{{ user.username }}</strong>!</p>
-      <p>Email: {{ user.email }}</p>
-      <p>Unique ID: <code>{{ user.id }}</code></p>
+      <p>Bem-vindo, <strong>{{ user.username }}</strong>!</p>
+      <br>
+      <p>Use a navegação acima para gerenciar seu time, visitar a loja ou jogar.</p>
+      <p>Divirta-se jogando DGG's Ultimate Brasileirão Team Manager!</p
     </div>
   </body>
 </html>

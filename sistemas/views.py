@@ -1402,13 +1402,18 @@ def _compute_team_composition_strength(team_slots):
         "neutral": neutral_power,
     }
 
-
 def _simulate_match(user_team_slots, ai_team_slots, seed=None):
     """
-    Simula 90 minutos (45+45) — versão que gera 'micro-eventos' por minuto
-    (ex.: posse -> finalização -> resultado) mas mantém apenas um registro
-    por minuto no array `events`. O prefixo do minuto aparece somente na
-    primeira frase daquele minuto para evitar repetir "23' — ..." várias vezes.
+    Simula 90 minutos (45+45) — versão que gera textos mais variados usando
+    diferentes jogadores por minuto, evitando sempre usar o "primeiro" da zona.
+
+    Mudanças principais:
+    - Seleção aleatória entre jogadores disponíveis nas zonas (off/mid/def/gk),
+      preferindo zonas conforme pedido (ex: prefira 'off' para quem finaliza).
+    - Procura devolver jogadores distintos para attacker/assister/defender quando possível.
+    - Mantém apenas 1 evento por minuto (concatena micro-frases), prefixo do minuto
+      aparece só na primeira micro-frase do minuto.
+    - Conserva probabilidades e mecânica de cálculo de finalização / gol do código anterior.
     """
     if seed is None:
         seed = uuid.uuid4().hex
@@ -1451,28 +1456,80 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
             return "Jogador #????"
 
     def _flatten_zone_players(slots_dict):
+        """Retorna lista de snapshots válidos (gk + def/mid/off)."""
         out = []
         if not slots_dict:
             return out
-        gk = slots_dict.get("gk")
-        if isinstance(gk, dict) and gk:
-            out.append(gk)
+        gk_snap = slots_dict.get("gk")
+        if isinstance(gk_snap, dict) and gk_snap:
+            out.append(gk_snap)
         for zone in ("def", "mid", "off"):
             for p in (slots_dict.get(zone) or []):
                 if isinstance(p, dict) and p:
                     out.append(p)
         return out
 
+    def _candidates_in_zone(zone_slots, zone_name):
+        """Retorna lista de snapshots válidos para uma zona específica."""
+        if not zone_slots:
+            return []
+        if zone_name == "gk":
+            gk_snap = zone_slots.get("gk")
+            return [gk_snap] if isinstance(gk_snap, dict) and gk_snap else []
+        return [p for p in (zone_slots.get(zone_name) or []) if isinstance(p, dict) and p]
+
     def _choose_from_zone_prefer(zone_slots, prefer_order):
+        """
+        Retorna um jogador aleatório a partir de uma ordem de preferência de zonas.
+        Antes: pegava o primeiro; agora randomiza entre os candidatos da zona.
+        """
         for zone in prefer_order:
-            lst = zone_slots.get(zone) or []
-            for p in lst:
-                if isinstance(p, dict) and p:
-                    return p
+            lst = _candidates_in_zone(zone_slots, zone)
+            if lst:
+                return rnd.choice(lst)
+        # fallback: qualquer jogador disponível
         flat = _flatten_zone_players(zone_slots)
         if flat:
             return rnd.choice(flat)
         return None
+
+    def _sample_distinct_players(zone_slots, prefer_order, want=2):
+        """
+        Tenta retornar até `want` jogadores distintos (list de snapshots).
+        - percorre prefer_order e coleta candidatos;
+        - escolhe aleatoriamente sem repetição até preencher `want`;
+        - se insuficientes, usa jogadores de outras zonas (flatten) sem repetir.
+        Retorna lista (pode ter tamanho < want).
+        """
+        chosen = []
+        used_ids = set()
+        # try each preferred zone collecting candidates
+        for zone in prefer_order:
+            candidates = _candidates_in_zone(zone_slots, zone)
+            # shuffle local copy then pick those not used
+            pool = [p for p in list(candidates) if str(p.get("id")) not in used_ids]
+            rnd.shuffle(pool)
+            for p in pool:
+                if len(chosen) >= want:
+                    break
+                pid = str(p.get("id"))
+                if pid not in used_ids:
+                    chosen.append(p)
+                    used_ids.add(pid)
+            if len(chosen) >= want:
+                break
+        # if still short, fill from any zone
+        if len(chosen) < want:
+            flat = [p for p in _flatten_zone_players(zone_slots) if str(p.get("id")) not in used_ids]
+            rnd.shuffle(flat)
+            for p in flat:
+                if len(chosen) >= want:
+                    break
+                pid = str(p.get("id"))
+                if pid not in used_ids:
+                    chosen.append(p)
+                    used_ids.add(pid)
+        return chosen
 
     # templates base (frases sem prefixo do minuto)
     TEMPLATES = {
@@ -1504,7 +1561,7 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
         ],
         "goal": [
             "{attack_marker}GOL! {scorer} balança as redes! ({team})",
-            "{attack_marker}GOAL de {scorer}! Assistência de {assister}."
+            "{attack_marker}GOOOL de {scorer}! Assistência de {assister}."
         ],
         "miss": [
             "{attacker} erra por pouco — escapou por centímetros.",
@@ -1524,32 +1581,39 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
         ]
     }
 
-    def _render_template(action, minute_prefix, team_label, attacking_slots, defending_slots, include_minute):
+    def _render_template(action, minute_prefix, team_label, attacking_slots, defending_slots, include_minute, minute=None):
         """
         Gera uma frase para 'action'. include_minute controla se adiciona
-        o prefixo do minuto (ex: \"23' — \") — normalmente só é True para a
-        primeira frase do minuto.
+        o prefixo do minuto (ex: \"23' — \") — normalmente só True para a
+        primeira micro-frase do minuto.
+        Usa seleção mais variada de jogadores (sample distinct).
         """
-        attacker_forward = _choose_from_zone_prefer(attacking_slots, ["off", "mid", "def"])
-        attacker_mid = _choose_from_zone_prefer(attacking_slots, ["mid", "off", "def"])
-        defender = _choose_from_zone_prefer(defending_slots, ["def", "mid", "off"])
+        # preferências: para atacante prefira 'off' depois 'mid', para auxiliar prefira 'mid'
+        attacker_candidates = _sample_distinct_players(attacking_slots, ["off", "mid", "def"], want=2)
+        # attacker_candidates[0] será atacante principal (se existir),
+        # attacker_candidates[1] pode servir como assistente ou segundo atacante.
+        attacker_forward = attacker_candidates[0] if len(attacker_candidates) >= 1 else None
+        attacker_second = attacker_candidates[1] if len(attacker_candidates) >= 2 else None
+
+        # defender/mid/keeper pick
+        defender_candidate = _choose_from_zone_prefer(defending_slots, ["def", "mid", "off"])
+        mid_candidate = _choose_from_zone_prefer(attacking_slots, ["mid", "off", "def"])
         keeper_snap = (defending_slots.get("gk") if isinstance(defending_slots.get("gk"), dict) else None) or {}
 
-        attacker_name = _get_name(attacker_forward)
-        mid_name = _get_name(attacker_mid)
-        defender_name = _get_name(defender)
+        attacker_name = _get_name(attacker_forward) if attacker_forward else _get_name(None)
+        assister_name = _get_name(attacker_second) if attacker_second else _get_name(mid_candidate)
+        mid_name = _get_name(mid_candidate)
+        defender_name = _get_name(defender_candidate)
         keeper_name = _get_name(keeper_snap)
         scorer_name = _get_name(attacker_forward)
-        assister_name = _get_name(attacker_mid)
 
         attack_actions = {"start_possession", "advance", "shot", "cross", "goal"}
         attack_marker = f"[ATAQUE {team_label}] " if action in attack_actions else ""
 
         template_list = TEMPLATES.get(action) or ["Aconteceu algo..."]
-        chosen = rnd.choice(template_list)
+        chosen_template = rnd.choice(template_list)
 
-        # montar frase (sem minute prefixo aqui)
-        sentence = chosen.format(
+        sentence = chosen_template.format(
             attack_marker=attack_marker,
             attacker=attacker_name,
             mid=mid_name,
@@ -1559,15 +1623,16 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
             assister=assister_name,
             team=team_label
         )
+
         if include_minute and minute_prefix:
             return f"{minute_prefix}{sentence}"
         return sentence
 
-    # ---------- simulate 90 minutes (micro-eventos por minuto, 1 registro por minuto) ----------
+    # ---------- simulate 90 minutes (1 registro por minuto) ----------
     for minute in range(1, 91):
         half = 1 if minute <= 45 else 2
 
-        # recompute strengths a cada minuto (mantém dinâmica)
+        # recompute strengths cada minuto
         home_strength = _compute_team_composition_strength(home_slots)
         away_strength = _compute_team_composition_strength(away_slots)
 
@@ -1587,35 +1652,34 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
 
         minute_prefix = f"{minute}' — "
 
-        # primeiro micro-evento: posse ou avanço (mantido similar ao antigo)
-        if rnd.random() < 0.65:
-            first_action = "start_possession"
-        else:
-            first_action = "advance"
-
+        # primeira micro-ação do minuto
+        first_action = "start_possession" if rnd.random() < 0.65 else "advance"
         sentences = []
-        # primeira frase com prefixo do minuto
-        sentences.append(_render_template(first_action, minute_prefix, attacking_label, attacking_slots, defending_slots, include_minute=True))
+        sentences.append(_render_template(first_action, minute_prefix, attacking_label, attacking_slots, defending_slots, include_minute=True, minute=minute))
 
-        # calcular probabilidade de finalização (mesma fórmula antiga)
+        # probabilidade de finalização (mesma fórmula)
         shot_chance_denom = attacking_strength["attack"] + attacking_strength["neutral"] * 0.5 + defending_strength["defense"] * 0.5 + 1e-6
         shot_probability = (attacking_strength["attack"] / shot_chance_denom) * 0.25
         shot_probability *= rnd.uniform(0.8, 1.2)
-
         did_shot = rnd.random() < shot_probability
 
         if did_shot:
-            # adicionar frase de finalização (sem repetir minuto)
+            # finalização: escolhe quem finaliza entre atacantes/médios (melhor variedade)
+            # tenta escolher 1-2 atacantes distintos
+            shooters = _sample_distinct_players(attacking_slots, ["off", "mid", "def"], want=2)
+            shooter = shooters[0] if shooters else _choose_from_zone_prefer(attacking_slots, ["off", "mid", "def"])
+            assister = shooters[1] if len(shooters) >= 2 else _choose_from_zone_prefer(attacking_slots, ["mid", "off", "def"])
+            # frase de chute
             sentences.append(_render_template("shot", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
-
-            # resolver resultado único da finalização
+            # resolver resultado
             shot_power = attacking_strength["attack"] * rnd.uniform(0.6, 1.4)
             keeper_power = (defending_strength["gk"] * 1.8) + (defending_strength["def"] * 0.6)
             goal_probability = shot_power / (shot_power + keeper_power + 1e-6)
             goal_probability = max(0.02, min(0.7, goal_probability * 0.7))
-
             if rnd.random() < goal_probability:
-                # gol
+                # para a frase de gol, queremos usar scorer + assister reais se disponíveis
+                # construímos temporariamente slots com shooter/assister para renderização coerente
+                # (a _render_template já seleciona amostras, mas passamos as mesmas slots para manter coerência)
                 sentences.append(_render_template("goal", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
                 event_type = "goal"
                 if possession_is_home:
@@ -1623,7 +1687,6 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
                 else:
                     score_away += 1
             else:
-                # salva ou erra
                 saved_chance = keeper_power / (shot_power + keeper_power + 1e-6)
                 if rnd.random() < saved_chance:
                     sentences.append(_render_template("keeper_save", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
@@ -1632,7 +1695,7 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
                     sentences.append(_render_template("miss", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
                     event_type = "miss"
         else:
-            # sem finalização: escolher 1 micro-evento de follow-up (um só)
+            # sem finalização: 1 micro-evento
             r = rnd.random()
             if r < 0.12:
                 follow = "intercepted"
@@ -1647,7 +1710,7 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
             sentences.append(_render_template(follow, None, attacking_label, attacking_slots, defending_slots, include_minute=False))
             event_type = follow
 
-        # juntar frases sem repetir minute prefix (juntamos com espaço)
+        # juntar frases (apenas 1 registro por minuto)
         full_text = " ".join(sentences)
 
         events.append({

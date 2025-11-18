@@ -252,6 +252,12 @@ def update_pack(conn):
 # --- Add / Remove players storing full object ---
 
 def add_player_to_pack(conn):
+    """
+    Adiciona um jogador ao pack — escolha de tipo simplificada:
+    - Digite '1' para jogador de campo (field)
+    - Digite '2' para goleiro (gk)
+    Aceita também 'field' ou 'gk' caso prefira.
+    """
     pid = input_nonempty("Digite o id do pack: ")
     cur = conn.execute("SELECT id, field_players, gk_players FROM sistemas_packs WHERE id = ?", (pid,))
     row = cur.fetchone()
@@ -260,9 +266,18 @@ def add_player_to_pack(conn):
         return
 
     print("Adicionar jogador ao pack: escolha tipo e id do jogador.")
-    ptype = input("Tipo ('field' para jogador de campo, 'gk' para goleiro): ").strip().lower()
-    if ptype not in ("field", "gk"):
-        print("Tipo inválido.")
+    print("1) Jogador de campo")
+    print("2) Goleiro")
+    type_choice = input("Escolha (1/2) ou digite 'field'/'gk': ").strip().lower()
+
+    if type_choice == "1":
+        ptype = "field"
+    elif type_choice == "2":
+        ptype = "gk"
+    elif type_choice in ("field", "gk"):
+        ptype = type_choice
+    else:
+        print("Tipo inválido. Use 1 para jogador de campo ou 2 para goleiro.")
         return
 
     player_id = input_nonempty("Digite o player id (UUID) (ou digite 'search' para procurar): ")
@@ -286,7 +301,7 @@ def add_player_to_pack(conn):
     weight = input_int("Weight (probabilidade relativa, inteiro, default 1): ", default=1) or 1
     note = input("Observação (opcional): ").strip() or ""
 
-    # fetch full object from players table
+    # buscar objeto completo do jogador nas tabelas
     player_obj = None
     if ptype == "field":
         player_obj = fetch_field_player_object(conn, player_id)
@@ -295,14 +310,12 @@ def add_player_to_pack(conn):
 
     if player_obj is None:
         print("Jogador não encontrado nas tabelas de jogadores; você ainda pode adicionar manualmente os campos.")
-        # perguntar se quer adicionar manualmente
         if input("Adicionar manualmente com apenas ID (s/N)? ").strip().lower() != "s":
             print("Cancelado.")
             return
-        # minimal object
         player_obj = {"id": str(player_id), "name": str(player_id)}
 
-    # attach weight & note (do not overwrite player fields)
+    # anexar weight & note (sem sobrescrever campos do jogador)
     entry = dict(player_obj)
     entry["weight"] = int(weight or 1)
     entry["note"] = note or ""
@@ -311,7 +324,7 @@ def add_player_to_pack(conn):
     gk_entries = _load_json_list(row["gk_players"])
     target_list = field_entries if ptype == "field" else gk_entries
 
-    # prevent duplicate by id
+    # impedir duplicata por id
     if any(str(x.get("id")) == str(entry["id"]) for x in target_list):
         print("Este jogador já está associado a esse pack (entrada duplicada).")
         return
@@ -327,6 +340,8 @@ def add_player_to_pack(conn):
     )
     conn.commit()
     print("Adicionado (objeto completo salvo no JSON).")
+
+
 
 def remove_player_from_pack(conn):
     pid = input_nonempty("Digite o id do pack: ")
