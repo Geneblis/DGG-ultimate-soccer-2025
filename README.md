@@ -1,24 +1,21 @@
-# DGG's Ultimate Brasileirão Team Manager — README (rápido e humano)
+# DGG's Ultimate Brasileirão Team Manager 2025
 
 Projeto backend + templates para gerenciar times, abrir packs, montar escalações e jogar partidas simuladas. 
 
 ---
 
-## Requisitos (mínimos)
+## Requisitos
 
-* Python 3.10+ (recomendado 3.10/3.11)
-* git (opcional)
-* `pip` disponível
-* Sistema com suporte a SQLite (vem por padrão com Python)
+* Python 3.10+
 
 ---
 
 ## Passo a passo — ambiente local (Linux / macOS / Windows)
 
-1. **Clone o repositório** (se ainda não fez)
+1. **Clone o repositório**
 
 ```bash
-git clone <url-do-repo>
+git clone https://github.com/Geneblis/DGG-ultimate-soccer-2025
 cd DGG-ultimate-soccer-2025
 ```
 
@@ -46,7 +43,6 @@ python -m venv .venv
 ```
 
 3. **Instale dependências**
-   Se houver `requirements.txt`:
 
 ```bash
 pip install -r requirements.txt
@@ -62,8 +58,6 @@ pip install django
 
 ```bash
 python manage.py migrate
-python manage.py createsuperuser
-# siga as instruções para email/username/password
 ```
 
 
@@ -79,22 +73,4 @@ Para expor na rede (por ex. testar em outro dispositivo na mesma LAN):
 ```bash
 python manage.py runserver 0.0.0.0:8000
 ```
-
---
-## Comandos úteis
-
-* `python manage.py makemigrations` — criar migrations locais (se mudar models)
-* `python manage.py migrate` — aplicar migrations
-* `python manage.py createsuperuser` — criar admin
-* `python manage.py runserver 0.0.0.0:8000` — rodar servidor acessível na LAN
-* `python manage.py shell` — console interativo do Django
-* `python manage.py check` — checa problemas de configuração
-
 ---
-
-## Executando em produção (observações rápidas)
-
-* Não use `runserver` em produção. Use Gunicorn / uWSGI + Nginx.
-* Configure `ALLOWED_HOSTS`, `DEBUG=False`, variáveis de ambiente seguras.
-* Configure `STATIC_ROOT` e rode `python manage.py collectstatic`.
-* Faça backup do `bancos/db.sqlite3` ou migre para um SGBD de produção (Postgres).
