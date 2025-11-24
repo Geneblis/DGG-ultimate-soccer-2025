@@ -1,14 +1,22 @@
 # DGG's Ultimate Brasileirão Team Manager 2025
 
-Projeto backend + templates para gerenciar times, abrir packs, montar escalações e jogar partidas simuladas. 
+Projeto sem fins lucrativos de Back-End com foco em templates para gerenciar times, abrir packs, montar escalações e jogar partidas simuladas. 
 
 ---
+
+> # **Aviso legal / Disclaimer**
+>
+> Este projeto **não reivindica** qualquer direito autoral ou de imagem sobre jogadores, clubes ou material gráfico utilizado para demonstração. Qualquer imagem ou recurso de terceiros incluído é usado apenas para fins ilustrativos. Se um titular de direitos solicitar a remoção de conteúdo ou se houver exigência legal, essas imagens/recursos poderão ser **removidos a qualquer momento** do repositório ou do serviço público sem aviso prévio.  
+> Se você pretende contribuir com imagens ou assets proprietários, obtenha as permissões apropriadas antes do envio.
+
+---
+
+<br>
+<br>
 
 ## Requisitos
 
 * Python 3.10+
-
----
 
 ## Passo a passo — ambiente local (Linux / macOS / Windows)
 
