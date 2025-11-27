@@ -160,12 +160,32 @@ function formationPosition(posToken, isHome) {
   return [ flipX(0.5), slotYs[Math.abs(h) % slotYs.length] ];
 }
 
+/* maps to handle duplicate original ids:
+   - idToSnapshot: keyed by unique display id (used for SVG nodes)
+   - origToUniqueIds: original id -> array of display ids
+   - origToPrimary: original id -> first display id (used to resolve animations/events)
+   - origToSnapshotFirst: original id -> snapshot (first occurrence) for pretty text replacement
+*/
 const idToSnapshot = {};
+const origToUniqueIds = {};
+const origToPrimary = {};
+const origToSnapshotFirst = {};
+
 function registerLineup(list, isHome) {
-  (list || []).forEach(it => {
+  (list || []).forEach((it, index) => {
     const snap = it.player || it;
     if (!snap) return;
-    const id = String(snap.id || snap.object_id || snap.name || ("unk_"+Math.random()));
+    const origId = String(snap.id || snap.object_id || snap.name || ("unk"));
+    let uniqueId = origId;
+    if (origToUniqueIds[origId]) {
+      uniqueId = origId + "__" + (origToUniqueIds[origId].length + 1);
+      origToUniqueIds[origId].push(uniqueId);
+    } else {
+      origToUniqueIds[origId] = [ uniqueId ];
+      origToSnapshotFirst[origId] = snap;
+    }
+    if (!origToPrimary[origId]) origToPrimary[origId] = origToUniqueIds[origId][0];
+
     if (!snap._norm_pos) {
       if (snap.pos_x !== undefined && snap.pos_y !== undefined) {
         snap._norm_pos = [ Number(snap.pos_x), Number(snap.pos_y) ];
@@ -175,7 +195,7 @@ function registerLineup(list, isHome) {
       }
     }
     snap._team_is_home = isHome;
-    idToSnapshot[id] = snap;
+    idToSnapshot[uniqueId] = snap;
   });
 }
 registerLineup(userLineup, homeIsUser);
@@ -184,11 +204,11 @@ registerLineup(aiLineup, !homeIsUser);
 const playerNodes = {};
 function normToPx(norm) { return [ Math.round(norm[0]*W), Math.round(norm[1]*H) ]; }
 
-function createPlayerNode(snapshot, id, teamColor) {
+function createPlayerNode(snapshot, displayId, teamColor) {
   const norm = snapshot._norm_pos || [0.5,0.5];
   const [cx,cy] = normToPx(norm);
   const g = document.createElementNS("http://www.w3.org/2000/svg","g");
-  g.setAttribute("data-player", id);
+  g.setAttribute("data-player", displayId);
   g.style.transform = `translate(${cx}px, ${cy}px)`;
   g.style.transition = "transform 450ms linear";
 
@@ -212,19 +232,19 @@ function createPlayerNode(snapshot, id, teamColor) {
 
   g.addEventListener("click", ev => {
     ev.stopPropagation();
-    showPlayerCard(id, ev.clientX, ev.clientY);
+    showPlayerCard(displayId, ev.clientX, ev.clientY);
   });
 
-  playerNodes[id] = { g, circle, text, pos: norm.slice(), snapshot };
+  playerNodes[displayId] = { g, circle, text, pos: norm.slice(), snapshot };
 }
 
 (function initNodes(){
   const homeColor = "#1f6fff";
   const awayColor = "#c53030";
-  Object.keys(idToSnapshot).forEach(id => {
-    const snap = idToSnapshot[id];
+  Object.keys(idToSnapshot).forEach(displayId => {
+    const snap = idToSnapshot[displayId];
     const color = snap._team_is_home ? homeColor : awayColor;
-    createPlayerNode(snap, id, color);
+    createPlayerNode(snap, displayId, color);
   });
 })();
 
@@ -262,9 +282,10 @@ function moveBallTo(normPos, ms) {
 function prettyEventText(text) {
   if (!text) return "";
   let out = String(text);
-  Object.keys(idToSnapshot).forEach(id => {
-    const name = idToSnapshot[id].name || idToSnapshot[id].player_name || id;
-    out = out.split(id).join(name);
+  Object.keys(origToSnapshotFirst).forEach(origId => {
+    const snap = origToSnapshotFirst[origId];
+    const name = (snap && (snap.name || snap.player_name)) || origId;
+    out = out.split(origId).join(name);
   });
   return out;
 }
@@ -288,7 +309,10 @@ async function runEventAnimations(ev) {
   if (Array.isArray(ev.animations) && ev.animations.length) {
     for (const a of ev.animations) {
       if (a.type === "pass") {
-        const from = String(a.player_from_id), to = String(a.player_to_id);
+        const origFrom = String(a.player_from_id);
+        const origTo = String(a.player_to_id);
+        const from = origToPrimary[origFrom] || origFrom;
+        const to = origToPrimary[origTo] || origTo;
         const fromNode = playerNodes[from], toNode = playerNodes[to];
         const fromPos = fromNode ? fromNode.pos : (idToSnapshot[from] ? idToSnapshot[from]._norm_pos : [0.5,0.5]);
         const toPos = toNode ? toNode.pos : (idToSnapshot[to] ? idToSnapshot[to]._norm_pos : [0.5,0.5]);
@@ -303,21 +327,23 @@ async function runEventAnimations(ev) {
           await new Promise(r=>setTimeout(r, a.duration_ms||260));
         }
       } else if (a.type === "dribble" || a.type === "run") {
-        const id = String(a.player_from_id);
-        const toPos = a.to_pos || (idToSnapshot[id] ? idToSnapshot[id]._norm_pos : [0.5,0.5]);
-        moveNodeToNorm(id, toPos, a.duration_ms||280);
+        const origId = String(a.player_from_id);
+        const displayId = origToPrimary[origId] || origId;
+        const toPos = a.to_pos || (playerNodes[displayId] ? playerNodes[displayId].pos : [0.5,0.5]);
+        moveNodeToNorm(displayId, toPos, a.duration_ms||280);
         moveBallTo(toPos, a.duration_ms||280);
         await new Promise(r=>setTimeout(r, a.duration_ms||300));
       } else if (a.type === "shot") {
-        const shooter = String(a.player_from_id);
-        const shooterNode = playerNodes[shooter];
-        const shooterPos = shooterNode ? shooterNode.pos : (idToSnapshot[shooter] ? idToSnapshot[shooter]._norm_pos : [0.5,0.5]);
+        const origShooter = String(a.player_from_id);
+        const shooterId = origToPrimary[origShooter] || origShooter;
+        const shooterNode = playerNodes[shooterId];
+        const shooterPos = shooterNode ? shooterNode.pos : (idToSnapshot[shooterId] ? idToSnapshot[shooterId]._norm_pos : [0.5,0.5]);
         const targetPos = a.to_pos || (shooterPos[0] < 0.5 ? [0.98,0.5] : [0.02,0.5]);
-        moveNodeToNorm(shooter, [ shooterPos[0]*0.95 + targetPos[0]*0.05, shooterPos[1]*0.95 + targetPos[1]*0.05 ], a.duration_ms||220);
+        moveNodeToNorm(shooterId, [ shooterPos[0]*0.95 + targetPos[0]*0.05, shooterPos[1]*0.95 + targetPos[1]*0.05 ], a.duration_ms||220);
         moveBallTo(targetPos, a.duration_ms||320);
         await new Promise(r=>setTimeout(r, a.duration_ms||340));
       } else if (a.type === "goal_effect") {
-        const pn = playerNodes[String(a.player_id)];
+        const pn = playerNodes[String(a.player_id)] || playerNodes[origToPrimary[String(a.player_id)]];
         if (pn) {
           pn.g.style.transition = `transform ${a.duration_ms/2}ms ease`;
           pn.g.style.transformOrigin = "center center";
@@ -337,7 +363,9 @@ async function runEventAnimations(ev) {
 
   const passMatch = (ev.text||"").match(/Passe de ([0-9a-fA-F-]+) para ([0-9a-fA-F-]+)/i);
   if (passMatch) {
-    const from = passMatch[1], to = passMatch[2];
+    const origFrom = passMatch[1], origTo = passMatch[2];
+    const from = origToPrimary[origFrom] || origFrom;
+    const to = origToPrimary[origTo] || origTo;
     const fromPos = (playerNodes[from] ? playerNodes[from].pos : (idToSnapshot[from] ? idToSnapshot[from]._norm_pos : [0.5,0.5]));
     const toPos = (playerNodes[to] ? playerNodes[to].pos : (idToSnapshot[to] ? idToSnapshot[to]._norm_pos : [0.5,0.5]));
     moveBallTo(fromPos, 120); await new Promise(r=>setTimeout(r,120));
@@ -409,34 +437,49 @@ function finishMatch() {
     const passMatch = (ev.text||"").match(/Passe de ([0-9a-fA-F-]+) para ([0-9a-fA-F-]+)/i);
     if (passMatch) {
       const from = passMatch[1];
-      const snap = idToSnapshot[from];
+      const primary = origToPrimary[from];
+      if (primary && idToSnapshot[primary] && idToSnapshot[primary]._norm_pos) { moveBallTo(idToSnapshot[primary]._norm_pos, 0); return; }
+      const snap = origToSnapshotFirst[from];
       if (snap && snap._norm_pos) { moveBallTo(snap._norm_pos, 0); return; }
     }
   }
   moveBallTo([0.5,0.5], 0);
 })();
 
-function showPlayerCard(id, clientX, clientY) {
-  const snap = idToSnapshot[id];
+function showPlayerCard(displayId, clientX, clientY) {
+  const snap = idToSnapshot[displayId];
   if (!snap) return;
   const img = snap.photo_path ? (STATIC_BASE + snap.photo_path) : (STATIC_BASE + "images/default-player.png");
   const name = snap.name || "Jogador";
-  const pos = snap.position || snap.pos || "";
-  const overall = snap.overall || "N/A";
-  const attack = snap.attack || snap.attack_rating || "N/A";
-  const passing = snap.passing || snap.passing_rating || "N/A";
-  const defense = snap.defense || snap.defense_rating || "N/A";
-  const speed = snap.speed || "N/A";
-  const handling = snap.handling || snap.reflex || null;
+  const pos = snap.position || snap.pos || "GoalkeeperZone";
+  const overall = (snap.overall !== undefined) ? snap.overall : "N/A";
+  const attack = (snap.attack !== undefined) ? snap.attack : (snap.attack_rating !== undefined ? snap.attack_rating : "N/A");
+  const passing = (snap.passing !== undefined) ? snap.passing : (snap.passing_rating !== undefined ? snap.passing_rating : "N/A");
+  const defense = (snap.defense !== undefined) ? snap.defense : (snap.defense_rating !== undefined ? snap.defense_rating : "N/A");
+  const speed = (snap.speed !== undefined) ? snap.speed : "N/A";
+  const handling = (snap.handling !== undefined) ? snap.handling : "N/A";
+  const positioning = (snap.positioning !== undefined) ? snap.positioning : "N/A";
+  const reflex = (snap.reflex !== undefined) ? snap.reflex : "N/A";
 
   let html = `<img src="${img}" alt="${name}">`;
   html += `<div class="pc-title">${name}</div>`;
   html += `<div class="pc-sub">${pos}</div>`;
   html += `<div style="clear:both"></div>`;
   html += `<div class="pc-attr">Overall: ${overall}</div>`;
-  html += `<div class="pc-attr">Ataque: ${attack} • Passe: ${passing}</div>`;
-  html += `<div class="pc-attr">Defesa: ${defense} • Velocidade: ${speed}</div>`;
-  if (handling) html += `<div class="pc-attr">Goleiro: ${handling}</div>`;
+  
+  if (attack !== "N/A" || passing !== "N/A" || defense !== "N/A") {
+    html += `<div style="margin-top:6px; font-weight:700">Estatísticas:</div>`;
+    if (attack !== null) html += `<div class="pc-attr">• Ataque: ${attack}</div>`;
+    if (passing !== null) html += `<div class="pc-attr">• Passe: ${passing}</div>`;
+    if (defense !== null) html += `<div class="pc-attr">• Defesa: ${defense}</div>`;
+  }
+  if (handling !== "N/A" || positioning !== "N/A" || reflex !== "N/A") {
+    html += `<div style="margin-top:6px; font-weight:700">Estatísticas:</div>`;
+    if (handling !== null) html += `<div class="pc-attr">• Manuseio: ${handling}</div>`;
+    if (positioning !== null) html += `<div class="pc-attr">• Posicionamento: ${positioning}</div>`;
+    if (reflex !== null) html += `<div class="pc-attr">• Reflexo: ${reflex}</div>`;
+  }
+  if (speed !== "N/A") html += `<div class="pc-attr">• Velocidade: ${speed}</div>`;
   html += `<div style="margin-top:6px; font-size:12px; color:#99a">Clique fora para fechar</div>`;
 
   playerCard.innerHTML = html;
