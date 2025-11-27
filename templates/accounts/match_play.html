@@ -160,12 +160,6 @@ function formationPosition(posToken, isHome) {
   return [ flipX(0.5), slotYs[Math.abs(h) % slotYs.length] ];
 }
 
-/* maps to handle duplicate original ids:
-   - idToSnapshot: keyed by unique display id (used for SVG nodes)
-   - origToUniqueIds: original id -> array of display ids
-   - origToPrimary: original id -> first display id (used to resolve animations/events)
-   - origToSnapshotFirst: original id -> snapshot (first occurrence) for pretty text replacement
-*/
 const idToSnapshot = {};
 const origToUniqueIds = {};
 const origToPrimary = {};
