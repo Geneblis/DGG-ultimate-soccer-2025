@@ -1360,372 +1360,430 @@ def start_authentic_match_view(request):
     return redirect("match_play", match_id=str(match.id))
 
 ##sistema de gameplay
-def _sum_zone_overall(zone_list, expected_count):
-    """
-    Recebe lista de snapshots (podem ser dicts) e expected_count (ex: 4 para defesa).
-    Se houver menos jogadores do que esperado, o total é reduzido proporcionalmente.
-    Retorna soma ajustada (float).
-    """
-    if not zone_list:
-        return 0.0
-    actual_count = sum(1 for x in zone_list if x)
-    raw_sum = sum(float(x.get("overall", 0) or 0) for x in zone_list if isinstance(x, dict))
-    if expected_count <= 0:
-        return raw_sum
-    completeness_ratio = (actual_count / expected_count) if expected_count > 0 else 1.0
-    return raw_sum * completeness_ratio
-
-def _compute_team_composition_strength(team_slots):
-    """
-    team_slots: dict with 'gk', 'def' list, 'mid' list, 'off' list (each element snap or "")
-    returns dict with zone strengths and derived attack/defense numbers
-    """
-    gk_strength = 0.0
-    def_strength = _sum_zone_overall(team_slots.get("def") or [], 4)
-    mid_strength = _sum_zone_overall(team_slots.get("mid") or [], 3)
-    off_strength = _sum_zone_overall(team_slots.get("off") or [], 3)
-    # GK: if present use overall else 0
-    gk_snap = team_slots.get("gk") or {}
-    if isinstance(gk_snap, dict):
-        gk_strength = float(gk_snap.get("overall", 0) or 0)
-
-    # derived values
-    attack_power = off_strength + mid_strength * 0.6
-    defense_power = def_strength + gk_strength * 0.8
-    neutral_power = mid_strength
-
-    return {
-        "gk": gk_strength,
-        "def": def_strength,
-        "mid": mid_strength,
-        "off": off_strength,
-        "attack": attack_power,
-        "defense": defense_power,
-        "neutral": neutral_power,
-    }
-
 def _simulate_match(user_team_slots, ai_team_slots, seed=None):
     """
-    Simula 90 minutos (45+45) — versão que gera textos mais variados usando
-    diferentes jogadores por minuto, evitando sempre usar o "primeiro" da zona.
+    Simula 90 minutos e retorna um dict com:
+      - events: lista de eventos com fields (minute, half, text, animations, possession_home, event_type, score_home, score_away)
+      - score_home, score_away, winner, meta
 
-    Mudanças principais:
-    - Seleção aleatória entre jogadores disponíveis nas zonas (off/mid/def/gk),
-      preferindo zonas conforme pedido (ex: prefira 'off' para quem finaliza).
-    - Procura devolver jogadores distintos para attacker/assister/defender quando possível.
-    - Mantém apenas 1 evento por minuto (concatena micro-frases), prefixo do minuto
-      aparece só na primeira micro-frase do minuto.
-    - Conserva probabilidades e mecânica de cálculo de finalização / gol do código anterior.
+    Entradas:
+      - user_team_slots / ai_team_slots: dicionários com chaves 'gk', 'def'(list), 'mid'(list), 'off'(list)
+        cada jogador é um snapshot dict que idealmente contém: id (string), name, (opcional) pos_x,pos_y.
+      - seed (opcional): para reprodutibilidade.
+
+    Observações:
+      - O texto dos eventos usa sempre nomes dos jogadores quando disponíveis.
+      - O campo `animations` contém ações com coordenadas normalizadas [0..1] para o cliente animar.
+      - As posições iniciais dos jogadores são atribuídas com base em formação 4-3-3 (similar ao front-end).
     """
-    if seed is None:
-        seed = uuid.uuid4().hex
-    rnd = random.Random(seed)
 
-    # decide casa
+    rnd = random.Random(seed or uuid.uuid4().hex)
+
+    # decide quem é "casa"
     home_is_user = rnd.choice([True, False])
 
-    # map home / away
+    # mapear home/away slots
     if home_is_user:
-        home_slots = user_team_slots
-        away_slots = ai_team_slots
-        home_label = "Seu Time"
-        away_label = "Adversário"
+        home_slots = user_team_slots or {"gk": "", "def": [], "mid": [], "off": []}
+        away_slots = ai_team_slots or {"gk": "", "def": [], "mid": [], "off": []}
     else:
-        home_slots = ai_team_slots
-        away_slots = user_team_slots
-        home_label = "Adversário"
-        away_label = "Seu Time"
+        home_slots = ai_team_slots or {"gk": "", "def": [], "mid": [], "off": []}
+        away_slots = user_team_slots or {"gk": "", "def": [], "mid": [], "off": []}
 
-    meta = {"seed": str(seed), "home_is_user": home_is_user}
+    meta = {"seed": str(seed or ""), "home_is_user": home_is_user}
 
+    # ---------- helpers de posição (coerente com o template JS) ----------
+    def formation_position_from_token(pos_token, is_home):
+        """
+        Retorna (x,y) normalizados para um token de posição (ex: 'GOL','DEF1','MID2','ATA3').
+        is_home=True => lado esquerdo é o time.
+        """
+        token = (pos_token or "").upper()
+        flip_x = (lambda x: x) if is_home else (lambda x: 1.0 - x)
+
+        if token.startswith("GOL") or token.startswith("GK"):
+            return flip_x(0.06), 0.50
+
+        if token.startswith("DEF"):
+            num = 1
+            try:
+                num = int((token.replace("DEF", "") or "1"))
+            except Exception:
+                num = 1
+            ys = [0.18, 0.37, 0.63, 0.82]
+            x = 0.22
+            idx = max(0, min(3, num - 1))
+            return flip_x(x), ys[idx]
+
+        if token.startswith("MID"):
+            num = 1
+            try:
+                num = int((token.replace("MID", "") or "1"))
+            except Exception:
+                num = 1
+            xs = [0.44, 0.50, 0.44]
+            ys = [0.42, 0.50, 0.58]
+            idx = max(0, min(2, num - 1))
+            return flip_x(xs[idx]), ys[idx]
+
+        if token.startswith("ATA") or token.startswith("FWD") or token.startswith("ST") or token.startswith("ATT"):
+            num = 1
+            try:
+                num = int(''.join(ch for ch in token if ch.isdigit()) or "1")
+            except Exception:
+                num = 1
+            xs = [0.68, 0.72, 0.68]
+            ys = [0.30, 0.50, 0.70]
+            idx = max(0, min(2, num - 1))
+            return flip_x(xs[idx]), ys[idx]
+
+        # fallback baseado em hash do token
+        s = (pos_token or "")[:32]
+        h = 0
+        for ch in s:
+            h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+        slotYs = [0.18, 0.32, 0.46, 0.58, 0.72, 0.86]
+        return flip_x(0.5), slotYs[h % len(slotYs)]
+
+    # cria uma lista ordenada de snapshots e atribui tokens (DEF1.., MID1.., ATA1..)
+    def build_lineup_slots_from_slotdict(slotdict, is_home):
+        """
+        Recebe slotdict {'gk','def','mid','off'} onde cada item pode ser dict snapshot ou id string.
+        Retorna lista de snapshots com campos normalizados (id,name,pos_x,pos_y,pos_token,_team_is_home).
+        """
+        out = []
+        # GK
+        gk_snap = slotdict.get("gk")
+        if isinstance(gk_snap, dict) and gk_snap:
+            snap = dict(gk_snap)
+            snap["id"] = str(snap.get("id") or snap.get("object_id") or uuid.uuid4().hex)
+            snap["pos_token"] = "GOL"
+            snap["pos_x"], snap["pos_y"] = formation_position_from_token("GOL", is_home)
+            snap["_team_is_home"] = is_home
+            out.append(snap)
+
+        # DEFs
+        for idx, p in enumerate(slotdict.get("def") or []):
+            if not p:
+                continue
+            snap = dict(p) if isinstance(p, dict) else {"id": str(p), "name": str(p)}
+            snap["id"] = str(snap.get("id") or uuid.uuid4().hex)
+            token = f"DEF{idx+1}"
+            snap["pos_token"] = token
+            snap["pos_x"], snap["pos_y"] = formation_position_from_token(token, is_home)
+            snap["_team_is_home"] = is_home
+            out.append(snap)
+
+        # MIDs
+        for idx, p in enumerate(slotdict.get("mid") or []):
+            if not p:
+                continue
+            snap = dict(p) if isinstance(p, dict) else {"id": str(p), "name": str(p)}
+            snap["id"] = str(snap.get("id") or uuid.uuid4().hex)
+            token = f"MID{idx+1}"
+            snap["pos_token"] = token
+            snap["pos_x"], snap["pos_y"] = formation_position_from_token(token, is_home)
+            snap["_team_is_home"] = is_home
+            out.append(snap)
+
+        # OFFs / ATAs
+        for idx, p in enumerate(slotdict.get("off") or []):
+            if not p:
+                continue
+            snap = dict(p) if isinstance(p, dict) else {"id": str(p), "name": str(p)}
+            snap["id"] = str(snap.get("id") or uuid.uuid4().hex)
+            token = f"ATA{idx+1}"
+            snap["pos_token"] = token
+            snap["pos_x"], snap["pos_y"] = formation_position_from_token(token, is_home)
+            snap["_team_is_home"] = is_home
+            out.append(snap)
+
+        return out
+
+    home_lineup = build_lineup_slots_from_slotdict(home_slots, is_home=True)
+    away_lineup = build_lineup_slots_from_slotdict(away_slots, is_home=False)
+
+    # criar mapeamento id -> snapshot (usado para gerar textos coerentes)
+    id_to_snapshot = {}
+    for snap in (home_lineup + away_lineup):
+        sid = str(snap.get("id"))
+        # garantir nome legível
+        if not snap.get("name"):
+            snap["name"] = f"Jogador {sid[-4:]}"
+        id_to_snapshot[sid] = snap
+
+    # helpers de seleção (com variedade, evitando escolher sempre o primeiro)
+    def flatten_lineup(lineup):
+        return [p for p in lineup if isinstance(p, dict)]
+
+    def random_choice_player_from_zone(lineup, prefer_zone=None):
+        """
+        prefer_zone: a string 'off','mid','def','gk' indica preferência.
+        lineup é a lista com pos_token setado para cada snap.
+        Retorna snapshot ou None.
+        """
+        if not lineup:
+            return None
+        # filtrar por zone token
+        zone_map = {
+            "gk": lambda s: s.get("pos_token", "").startswith("GOL"),
+            "def": lambda s: s.get("pos_token", "").startswith("DEF"),
+            "mid": lambda s: s.get("pos_token", "").startswith("MID"),
+            "off": lambda s: s.get("pos_token", "").startswith("ATA"),
+        }
+        if prefer_zone in zone_map:
+            candidates = [s for s in lineup if zone_map[prefer_zone](s)]
+            if candidates:
+                return rnd.choice(candidates)
+        # fallback qualquer jogador
+        return rnd.choice(lineup)
+
+    def sample_two_distinct(lineup, prefer_primary="off"):
+        """Retorna até 2 snapshots distintos: [primary, secondary_or_None]"""
+        if not lineup:
+            return []
+        primary = random_choice_player_from_zone(lineup, prefer_primary)
+        secondary_candidates = [p for p in lineup if p["id"] != primary["id"]]
+        secondary = rnd.choice(secondary_candidates) if secondary_candidates else None
+        return [primary, secondary]
+
+    # ---------- templates de texto ----------
+    TEMPLATES = {
+        "start_possession": ["{team} em posse — {attacker} conduz a bola.", "{attacker} começa a articular a jogada."],
+        "advance": ["{team} empurra o jogo — {attacker} avança.", "{attacker} progride pelo corredor."],
+        "pass": ["{attack_marker}Passe de {from_name} para {to_name}.", "{attack_marker}{from_name} encontra {to_name} com passe."],
+        "shot": ["{attack_marker}{attacker} finaliza com perigo!", "{attack_marker}{attacker} arrisca o chute!"],
+        "goal": ["{attack_marker}GOL! {scorer} balança as redes! ({team})", "{attack_marker}GOL de {scorer}! Assistência de {assister}."],
+        "miss": ["{attacker} erra por pouco.", "Na trave! {attacker} lamenta."],
+        "keeper_save": ["{keeper} faz uma grande defesa!", "Defesa espetacular de {keeper}!"],
+        "intercepted": ["{defender} intercepta e rouba a bola.", "{defender} corta a jogada."],
+        "foul": ["Falta em {attacker} — jogo parado.", "Falta marcada, bola parada para {team}."],
+        "cross": ["{attack_marker}{attacker} cruza na área.", "{attack_marker}Cruzamento perigoso de {attacker}."],
+        "dribble": ["{mid} tenta drible no meio.", "Troca de passes no meio-campo."]
+    }
+
+    # ---------- simulação dos 90 minutos com animações ----------
     events = []
     score_home = 0
     score_away = 0
 
-    # ---------- helpers ----------
-    def _get_name(player_snap):
-        """Retorna nome real se existir; senão 'Jogador #XXXX' derivado do id."""
-        try:
-            if not player_snap:
-                return "Jogador #????"
-            name_val = player_snap.get("name")
-            if name_val and str(name_val).strip():
-                return str(name_val)
-            pid = str(player_snap.get("id") or player_snap.get("object_id") or "")
-            short = pid[-4:] if pid else "????"
-            return f"Jogador #{short}"
-        except Exception:
-            return "Jogador #????"
+    flat_home = flatten_lineup(home_lineup)
+    flat_away = flatten_lineup(away_lineup)
 
-    def _flatten_zone_players(slots_dict):
-        """Retorna lista de snapshots válidos (gk + def/mid/off)."""
-        out = []
-        if not slots_dict:
-            return out
-        gk_snap = slots_dict.get("gk")
-        if isinstance(gk_snap, dict) and gk_snap:
-            out.append(gk_snap)
-        for zone in ("def", "mid", "off"):
-            for p in (slots_dict.get(zone) or []):
-                if isinstance(p, dict) and p:
-                    out.append(p)
-        return out
+    # função utilitária: cria animação de passe entre dois players (com pequenos timelines)
+    def make_pass_animation(from_snap, to_snap):
+        if not from_snap or not to_snap:
+            return None
+        return {
+            "type": "pass",
+            "player_from_id": str(from_snap["id"]),
+            "player_to_id": str(to_snap["id"]),
+            "from_pos": [float(from_snap["pos_x"]), float(from_snap["pos_y"])],
+            "to_pos": [float(to_snap["pos_x"]), float(to_snap["pos_y"])],
+            "duration_ms": rnd.randint(220, 420)
+        }
 
-    def _candidates_in_zone(zone_slots, zone_name):
-        """Retorna lista de snapshots válidos para uma zona específica."""
-        if not zone_slots:
-            return []
-        if zone_name == "gk":
-            gk_snap = zone_slots.get("gk")
-            return [gk_snap] if isinstance(gk_snap, dict) and gk_snap else []
-        return [p for p in (zone_slots.get(zone_name) or []) if isinstance(p, dict) and p]
+    def make_run_animation(player_snap, to_pos=None):
+        if not player_snap:
+            return None
+        dest = to_pos or [player_snap["pos_x"], player_snap["pos_y"]]
+        return {
+            "type": "run",
+            "player_from_id": str(player_snap["id"]),
+            "to_pos": [float(dest[0]), float(dest[1])],
+            "duration_ms": rnd.randint(200, 480)
+        }
 
-    def _choose_from_zone_prefer(zone_slots, prefer_order):
-        """
-        Retorna um jogador aleatório a partir de uma ordem de preferência de zonas.
-        Antes: pegava o primeiro; agora randomiza entre os candidatos da zona.
-        """
-        for zone in prefer_order:
-            lst = _candidates_in_zone(zone_slots, zone)
-            if lst:
-                return rnd.choice(lst)
-        # fallback: qualquer jogador disponível
-        flat = _flatten_zone_players(zone_slots)
-        if flat:
-            return rnd.choice(flat)
-        return None
+    def make_shot_animation(shooter_snap, target_pos=None):
+        if not shooter_snap:
+            return None
+        # target_pos default: gol adversário
+        shooter_is_home = bool(shooter_snap.get("_team_is_home"))
+        target_default = [0.98, 0.5] if shooter_is_home else [0.02, 0.5]
+        target = target_pos or target_default
+        return {
+            "type": "shot",
+            "player_from_id": str(shooter_snap["id"]),
+            "from_pos": [float(shooter_snap["pos_x"]), float(shooter_snap["pos_y"])],
+            "to_pos": [float(target[0]), float(target[1])],
+            "duration_ms": rnd.randint(280, 500)
+        }
 
-    def _sample_distinct_players(zone_slots, prefer_order, want=2):
-        """
-        Tenta retornar até `want` jogadores distintos (list de snapshots).
-        - percorre prefer_order e coleta candidatos;
-        - escolhe aleatoriamente sem repetição até preencher `want`;
-        - se insuficientes, usa jogadores de outras zonas (flatten) sem repetir.
-        Retorna lista (pode ter tamanho < want).
-        """
-        chosen = []
-        used_ids = set()
-        # try each preferred zone collecting candidates
-        for zone in prefer_order:
-            candidates = _candidates_in_zone(zone_slots, zone)
-            # shuffle local copy then pick those not used
-            pool = [p for p in list(candidates) if str(p.get("id")) not in used_ids]
-            rnd.shuffle(pool)
-            for p in pool:
-                if len(chosen) >= want:
-                    break
-                pid = str(p.get("id"))
-                if pid not in used_ids:
-                    chosen.append(p)
-                    used_ids.add(pid)
-            if len(chosen) >= want:
-                break
-        # if still short, fill from any zone
-        if len(chosen) < want:
-            flat = [p for p in _flatten_zone_players(zone_slots) if str(p.get("id")) not in used_ids]
-            rnd.shuffle(flat)
-            for p in flat:
-                if len(chosen) >= want:
-                    break
-                pid = str(p.get("id"))
-                if pid not in used_ids:
-                    chosen.append(p)
-                    used_ids.add(pid)
-        return chosen
-
-    # templates base (frases sem prefixo do minuto)
-    TEMPLATES = {
-        "start_possession": [
-            "{attack_marker}{attacker} conduz a bola e começa a construção de jogada.",
-            "{attack_marker}{team} com posse — {attacker} assume a articulação.",
-            "{attack_marker}{attacker} inicia a movimentação ofensiva."
-        ],
-        "advance": [
-            "{attack_marker}{attacker} avança pelo corredor e busca o espaço.",
-            "{attack_marker}{team} empurra para frente — {attacker} em progressão.",
-            "{attack_marker}{attacker} infiltra; chance se formando."
-        ],
-        "intercepted": [
-            "{defender} intercepta e corta a trama ofensiva.",
-            "{defender} rouba e segura a transição."
-        ],
-        "offside": [
-            "{scorer} em impedimento — bandeira levantada.",
-            "Impedimento anula a jogada de {scorer}."
-        ],
-        "cross": [
-            "{attack_marker}{attacker} cruza na área — atenção!",
-            "{attack_marker}Cruzamento de {attacker}, alguém aparece para concluir."
-        ],
-        "shot": [
-            "{attack_marker}{attacker} arma a finalização — é perigoso!",
-            "{attack_marker}{team} tenta o chute com {attacker} — bateu!"
-        ],
-        "goal": [
-            "{attack_marker}GOL! {scorer} balança as redes! ({team})",
-            "{attack_marker}GOOOL de {scorer}! Assistência de {assister}."
-        ],
-        "miss": [
-            "{attacker} erra por pouco — escapou por centímetros.",
-            "Na trave! {attacker} lamenta a chance perdida."
-        ],
-        "foul": [
-            "Falta em {attacker} — bola parada para {team}.",
-            "Falta dura, juiz sinaliza e o jogo para."
-        ],
-        "keeper_save": [
-            "{keeper} faz uma defesa sensacional!",
-            "Que defesa de {keeper}! Escanteio para os atacantes."
-        ],
-        "dribble": [
-            "Disputa no meio entre {mid} e {defender}.",
-            "Troca de passes no centro; jogo cadenciado."
-        ]
-    }
-
-    def _render_template(action, minute_prefix, team_label, attacking_slots, defending_slots, include_minute, minute=None):
-        """
-        Gera uma frase para 'action'. include_minute controla se adiciona
-        o prefixo do minuto (ex: \"23' — \") — normalmente só True para a
-        primeira micro-frase do minuto.
-        Usa seleção mais variada de jogadores (sample distinct).
-        """
-        # preferências: para atacante prefira 'off' depois 'mid', para auxiliar prefira 'mid'
-        attacker_candidates = _sample_distinct_players(attacking_slots, ["off", "mid", "def"], want=2)
-        # attacker_candidates[0] será atacante principal (se existir),
-        # attacker_candidates[1] pode servir como assistente ou segundo atacante.
-        attacker_forward = attacker_candidates[0] if len(attacker_candidates) >= 1 else None
-        attacker_second = attacker_candidates[1] if len(attacker_candidates) >= 2 else None
-
-        # defender/mid/keeper pick
-        defender_candidate = _choose_from_zone_prefer(defending_slots, ["def", "mid", "off"])
-        mid_candidate = _choose_from_zone_prefer(attacking_slots, ["mid", "off", "def"])
-        keeper_snap = (defending_slots.get("gk") if isinstance(defending_slots.get("gk"), dict) else None) or {}
-
-        attacker_name = _get_name(attacker_forward) if attacker_forward else _get_name(None)
-        assister_name = _get_name(attacker_second) if attacker_second else _get_name(mid_candidate)
-        mid_name = _get_name(mid_candidate)
-        defender_name = _get_name(defender_candidate)
-        keeper_name = _get_name(keeper_snap)
-        scorer_name = _get_name(attacker_forward)
-
-        attack_actions = {"start_possession", "advance", "shot", "cross", "goal"}
-        attack_marker = f"[ATAQUE {team_label}] " if action in attack_actions else ""
-
-        template_list = TEMPLATES.get(action) or ["Aconteceu algo..."]
-        chosen_template = rnd.choice(template_list)
-
-        sentence = chosen_template.format(
-            attack_marker=attack_marker,
-            attacker=attacker_name,
-            mid=mid_name,
-            defender=defender_name,
-            keeper=keeper_name,
-            scorer=scorer_name,
-            assister=assister_name,
-            team=team_label
-        )
-
-        if include_minute and minute_prefix:
-            return f"{minute_prefix}{sentence}"
-        return sentence
-
-    # ---------- simulate 90 minutes (1 registro por minuto) ----------
+    # loop principal de minutos
     for minute in range(1, 91):
         half = 1 if minute <= 45 else 2
 
-        # recompute strengths cada minuto
-        home_strength = _compute_team_composition_strength(home_slots)
-        away_strength = _compute_team_composition_strength(away_slots)
+        # recalcula forças simplificadas (aleatoriza um pouco para variedade)
+        def strength_of_lineup(lineup):
+            # soma de overalls se presente, fallback random
+            total_attack = 0.0
+            total_def = 0.0
+            total_gk = 0.0
+            neutral = 0.0
+            for p in lineup:
+                if not isinstance(p, dict):
+                    continue
+                total_attack += float(p.get("attack", rnd.uniform(0.5, 1.5)))
+                total_def += float(p.get("defense", rnd.uniform(0.5, 1.5)))
+                neutral += float(p.get("passing", 1.0))
+                if p.get("pos_token", "").startswith("GOL"):
+                    total_gk += float(p.get("handling", rnd.uniform(0.8, 1.2)))
+            # normalize with small epsilon
+            return {"attack": max(0.1, total_attack), "defense": max(0.1, total_def), "gk": max(0.1, total_gk or 1.0), "neutral": max(0.1, neutral)}
 
-        home_attack = home_strength["attack"] + 1e-6
-        away_defense = away_strength["defense"] + 1e-6
-        prob_home_possession = home_attack / (home_attack + away_defense)
+        home_strength = strength_of_lineup(flat_home)
+        away_strength = strength_of_lineup(flat_away)
 
+        # probabilidade de posse para home
+        home_attack_metric = home_strength["attack"] + 1e-6
+        away_defense_metric = away_strength["defense"] + 1e-6
+        prob_home_possession = home_attack_metric / (home_attack_metric + away_defense_metric)
         possession_is_home = rnd.random() < prob_home_possession
 
-        attacking_label = home_label if possession_is_home else away_label
-        defending_label = away_label if possession_is_home else home_label
-        attacking_strength = home_strength if possession_is_home else away_strength
-        defending_strength = away_strength if possession_is_home else home_strength
+        attacking_lineup = flat_home if possession_is_home else flat_away
+        defending_lineup = flat_away if possession_is_home else flat_home
+        attacking_label = "Seu Time" if (possession_is_home and home_is_user) or (not possession_is_home and not home_is_user) else "Adversário"
 
-        attacking_slots = home_slots if possession_is_home else away_slots
-        defending_slots = away_slots if possession_is_home else home_slots
-
-        minute_prefix = f"{minute}' — "
-
-        # primeira micro-ação do minuto
+        # primeiras micro-frases
         first_action = "start_possession" if rnd.random() < 0.65 else "advance"
         sentences = []
-        sentences.append(_render_template(first_action, minute_prefix, attacking_label, attacking_slots, defending_slots, include_minute=True, minute=minute))
+        animations = []
 
-        # probabilidade de finalização (mesma fórmula)
-        shot_chance_denom = attacking_strength["attack"] + attacking_strength["neutral"] * 0.5 + defending_strength["defense"] * 0.5 + 1e-6
-        shot_probability = (attacking_strength["attack"] / shot_chance_denom) * 0.25
+        # start possession sentence
+        attacker_choice = random_choice_player_from_zone(attacking_lineup, prefer_zone="off")
+        attacker_name = attacker_choice.get("name") if attacker_choice else "Um jogador"
+        sentences.append(TEMPLATES.get(first_action)[rnd.randint(0, len(TEMPLATES.get(first_action))-1)].format(team=attacking_label, attacker=attacker_name))
+
+        # decidir se teremos finalização
+        shot_chance_denom = ( (home_strength if possession_is_home else away_strength)["attack"]
+                              + (home_strength if possession_is_home else away_strength)["neutral"] * 0.5
+                              + (away_strength if possession_is_home else home_strength)["defense"] * 0.5 + 1e-6 )
+        shot_probability = ((home_strength if possession_is_home else away_strength)["attack"] / shot_chance_denom) * 0.25
         shot_probability *= rnd.uniform(0.8, 1.2)
         did_shot = rnd.random() < shot_probability
 
+        event_type = None
+
         if did_shot:
-            # finalização: escolhe quem finaliza entre atacantes/médios (melhor variedade)
-            # tenta escolher 1-2 atacantes distintos
-            shooters = _sample_distinct_players(attacking_slots, ["off", "mid", "def"], want=2)
-            shooter = shooters[0] if shooters else _choose_from_zone_prefer(attacking_slots, ["off", "mid", "def"])
-            assister = shooters[1] if len(shooters) >= 2 else _choose_from_zone_prefer(attacking_slots, ["mid", "off", "def"])
-            # frase de chute
-            sentences.append(_render_template("shot", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
+            # escolhe shooter e possivel assister
+            shooters = sample_two_distinct(attacking_lineup, prefer_primary="off")
+            shooter = shooters[0] if shooters else (attacking_lineup[0] if attacking_lineup else None)
+            assister = shooters[1] if len(shooters) >= 2 else None
+
+            # animação de aproximação e chute
+            shot_anim = make_shot_animation(shooter)
+            if shot_anim:
+                animations.append(shot_anim)
+                sentences.append(TEMPLATES["shot"][rnd.randint(0, len(TEMPLATES["shot"])-1)].format(attack_marker="[ATAQUE " + attacking_label + "] ", attacker=shooter.get("name")))
             # resolver resultado
-            shot_power = attacking_strength["attack"] * rnd.uniform(0.6, 1.4)
-            keeper_power = (defending_strength["gk"] * 1.8) + (defending_strength["def"] * 0.6)
+            shot_power = ( (shooter.get("attack") if shooter.get("attack") is not None else rnd.uniform(0.6,1.4)) * rnd.uniform(0.6, 1.4) )
+            keeper_power = ( (defending_lineup[0].get("handling") if defending_lineup and defending_lineup[0].get("pos_token","").startswith("GOL") else (away_strength["gk"] if possession_is_home else home_strength["gk"])) * 1.8 ) \
+                           + ( (away_strength if possession_is_home else home_strength)["defense"] * 0.6 )
             goal_probability = shot_power / (shot_power + keeper_power + 1e-6)
-            goal_probability = max(0.02, min(0.7, goal_probability * 0.7))
+            goal_probability = max(0.02, min(0.85, goal_probability * 0.7))
+
             if rnd.random() < goal_probability:
-                # para a frase de gol, queremos usar scorer + assister reais se disponíveis
-                # construímos temporariamente slots com shooter/assister para renderização coerente
-                # (a _render_template já seleciona amostras, mas passamos as mesmas slots para manter coerência)
-                sentences.append(_render_template("goal", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
-                event_type = "goal"
+                # gol
+                scorer_name = shooter.get("name")
+                assister_name = assister.get("name") if assister else ""
+                sentences.append(TEMPLATES["goal"][rnd.randint(0, len(TEMPLATES["goal"])-1)].format(attack_marker="[ATAQUE " + attacking_label + "] ", scorer=scorer_name, team=attacking_label, assister=assister_name or ""))
+                # adicionar efeito de gol para animação se quisermos
+                animations.append({"type": "goal_effect", "player_id": str(shooter["id"]), "duration_ms": 700})
                 if possession_is_home:
                     score_home += 1
                 else:
                     score_away += 1
+                event_type = "goal"
             else:
+                # salva ou erra
                 saved_chance = keeper_power / (shot_power + keeper_power + 1e-6)
                 if rnd.random() < saved_chance:
-                    sentences.append(_render_template("keeper_save", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
+                    sentences.append(TEMPLATES["keeper_save"][rnd.randint(0, len(TEMPLATES["keeper_save"])-1)].format(keeper=(defending_lineup[0].get("name") if defending_lineup else "Goleiro")))
+                    animations.append({"type": "keeper_save", "duration_ms": 420})
                     event_type = "keeper_save"
                 else:
-                    sentences.append(_render_template("miss", None, attacking_label, attacking_slots, defending_slots, include_minute=False))
+                    sentences.append(TEMPLATES["miss"][rnd.randint(0, len(TEMPLATES["miss"])-1)].format(attacker=shooter.get("name")))
+                    animations.append({"type": "miss", "duration_ms": 420})
                     event_type = "miss"
         else:
-            # sem finalização: 1 micro-evento
+            # follow-up sem chute: decide pass / intercepted / cross / foul / dribble
             r = rnd.random()
             if r < 0.12:
-                follow = "intercepted"
+                # intercepted
+                defender = random_choice_player_from_zone(defending_lineup, prefer_zone="def")
+                defender_name = defender.get("name") if defender else "zagueiro"
+                sentences.append(TEMPLATES["intercepted"][rnd.randint(0, len(TEMPLATES["intercepted"])-1)].format(defender=defender_name))
+                animations.append({"type": "intercepted", "player_id": str(defender["id"]) if defender else None, "duration_ms": 300})
+                event_type = "intercepted"
             elif r < 0.20:
-                follow = "offside"
+                # offside
+                attacker = random_choice_player_from_zone(attacking_lineup, prefer_zone="off")
+                attacker_name = attacker.get("name") if attacker else "atacante"
+                sentences.append(TEMPLATES["offside"][0].format(scorer=attacker_name) if "offside" in TEMPLATES else f"{attacker_name} em impedimento.")
+                animations.append({"type": "offside", "player_id": str(attacker["id"]) if attacker else None, "duration_ms": 300})
+                event_type = "offside"
             elif r < 0.35:
-                follow = "cross"
+                # cross -> simulamos passe cruzado para um atacante na área
+                passer, receiver = sample_two_distinct(attacking_lineup, prefer_primary="mid"), None
+                # sample_two_distinct retorna lista; ajustar
+                passer_snap = passer[0] if passer else None
+                # try to prefer an off target
+                possible_receivers = [p for p in attacking_lineup if p.get("pos_token","").startswith("ATA") and p.get("id") != (passer_snap["id"] if passer_snap else None)]
+                receiver_snap = rnd.choice(possible_receivers) if possible_receivers else (passer[1] if len(passer) > 1 else None)
+                if passer_snap and receiver_snap:
+                    sentences.append(TEMPLATES["cross"][rnd.randint(0, len(TEMPLATES["cross"])-1)].format(attack_marker="[ATAQUE " + attacking_label + "] ", attacker=passer_snap.get("name")))
+                    pass_anim = make_pass_animation(passer_snap, receiver_snap)
+                    if pass_anim:
+                        animations.append(pass_anim)
+                else:
+                    # fallback para dribble
+                    runner = random_choice_player_from_zone(attacking_lineup, prefer_zone="mid")
+                    sentences.append(TEMPLATES["dribble"][rnd.randint(0, len(TEMPLATES["dribble"])-1)].format(mid=(runner.get("name") if runner else "meio"), defender=(random_choice_player_from_zone(defending_lineup, "def") or {}).get("name", "zagueiro")))
+                    animations.append(make_run_animation(runner))
+                event_type = "cross"
             elif r < 0.45:
-                follow = "foul"
+                # foul
+                attacker = random_choice_player_from_zone(attacking_lineup, prefer_zone="off")
+                sentences.append(TEMPLATES["foul"][rnd.randint(0, len(TEMPLATES["foul"])-1)].format(attacker=(attacker.get("name") if attacker else "jogador"), team=attacking_label))
+                animations.append({"type": "foul", "duration_ms": 260})
+                event_type = "foul"
             else:
-                follow = "dribble"
-            sentences.append(_render_template(follow, None, attacking_label, attacking_slots, defending_slots, include_minute=False))
-            event_type = follow
+                # dribble/pass: escolhe um passe simples entre dois jogadores
+                from_snap, to_snap = None, None
+                candidates = attacking_lineup[:]
+                if candidates:
+                    from_snap = rnd.choice(candidates)
+                    possible_receivers = [p for p in candidates if p["id"] != from_snap["id"]]
+                    if possible_receivers:
+                        to_snap = rnd.choice(possible_receivers)
+                if from_snap and to_snap:
+                    sentences.append(TEMPLATES["pass"][rnd.randint(0, len(TEMPLATES["pass"])-1)].format(attack_marker="[ATAQUE " + attacking_label + "] ", from_name=from_snap.get("name"), to_name=to_snap.get("name")))
+                    pass_anim = make_pass_animation(from_snap, to_snap)
+                    if pass_anim:
+                        animations.append(pass_anim)
+                    event_type = "pass"
+                else:
+                    # fallback dribble
+                    runner = random_choice_player_from_zone(attacking_lineup, prefer_zone="mid")
+                    sentences.append(TEMPLATES["dribble"][rnd.randint(0, len(TEMPLATES["dribble"])-1)].format(mid=(runner.get("name") if runner else "meio"), defender=(random_choice_player_from_zone(defending_lineup, "def") or {}).get("name", "zagueiro")))
+                    animations.append(make_run_animation(runner))
+                    event_type = "dribble"
 
-        # juntar frases (apenas 1 registro por minuto)
-        full_text = " ".join(sentences)
-
+        # montar texto final (concatenar frases)
+        full_text = " ".join([s for s in sentences if s])
+        # gravar event
         events.append({
             "minute": minute,
             "half": half,
             "text": full_text,
-            "possession_home": possession_is_home,
-            "event_type": event_type,
+            "animations": [a for a in animations if a],
+            "possession_home": bool(possession_is_home),
+            "event_type": event_type or "play",
             "score_home": score_home,
             "score_away": score_away
         })
 
-    # final meta
+    # determinar vencedor
     if score_home > score_away:
         winner = "home"
     elif score_away > score_home:
@@ -1738,7 +1796,10 @@ def _simulate_match(user_team_slots, ai_team_slots, seed=None):
         "score_home": score_home,
         "score_away": score_away,
         "winner": winner,
-        "meta": meta
+        "meta": meta,
+        # também retornamos lineups (útil para salvar/inspecionar)
+        "home_lineup": home_lineup,
+        "away_lineup": away_lineup
     }
 
 # ----------------- Views expostas -----------------
@@ -1833,42 +1894,46 @@ def start_random_match_view(request):
 @require_http_methods(["GET"])
 def match_play_view(request, match_id):
     """
-    Página que apresenta o console da partida.
-    Recebe o Match.events (lista) e exibe uma linha a cada 2s via JS.
-
-    Antes de deletar os registros do DB, copiamos tudo o que precisamos (events, placar, escalações).
-    Depois, em transação, creditamos 100 moedas ao usuário se venceu e deletamos Match e AITeam.
+    Prepara a página de reprodução da partida:
+     - carrega Match, copia os events, placar e escalações;
+     - garante que cada snapshot tenha pos_x/pos_y e id coerentes para o cliente;
+     - confere o resultado e credita moedas (vitória +100, empate +50);
+     - deleta registros temporários (Match e AITeam) em transação.
+    Retorna render com context contendo:
+     - events_json, user_lineup (lista), ai_lineup (lista), home_is_user, score_home, score_away, coins_awarded
     """
+
     user = _get_current_user(request)
     if not user:
         return redirect("/login/")
 
     match = get_object_or_404(Match, pk=match_id)
 
-    # copiar dados essenciais ANTES de deletar
+    # copiar dados antes de qualquer exclusão
     events = list(match.events or [])
     score_home = int(getattr(match, "score_home", 0) or 0)
     score_away = int(getattr(match, "score_away", 0) or 0)
     home_is_user = bool(getattr(match, "home_is_user", True))
-    ai_team = match.ai_team  # pode ser None
+    ai_team = match.ai_team
     user_team = match.user_team
 
-    # resolver escalações como snapshots (listas com dicts) para mostrar no template
+    # função interna para resolver uma slot entry (pode ser snapshot dict, id string ou "")
     def _resolve_slot_snapshot_for_team(slot_value, user_context=None):
-        # if snapshot dict -> return it
         if not slot_value:
             return ""
         if isinstance(slot_value, dict):
             return slot_value
-        # if id string and user_context provided, try to find in inventory
         pid = str(slot_value)
+        # tentar InventoryItem se usuário conhecido
         if user_context:
             inv = InventoryItem.objects.filter(user=user_context).filter(Q(object_id=pid) | Q(player_data__id=pid)).first()
             if inv:
                 snap = inv.get_player_snapshot()
                 if snap:
+                    if snap.get("type") == "field":
+                        snap["position"] = snap.get("position")
                     return snap
-        # fallback: try DB lookup
+        # fallback DB
         g = JogadorGoleiro.objects.filter(pk=pid).first()
         if g:
             return {
@@ -1886,7 +1951,7 @@ def match_play_view(request, match_id):
             }
         return ""
 
-    # build user_slots_resolved
+    # montar slots como no seu código original
     if user_team:
         raw_user_slots = user_team.slots or {}
         user_slots_resolved = {
@@ -1898,7 +1963,6 @@ def match_play_view(request, match_id):
     else:
         user_slots_resolved = {"gk": "", "def": [], "mid": [], "off": []}
 
-    # build ai_slots_resolved (AI saved snapshots at creation)
     if ai_team:
         raw_ai_slots = ai_team.slots or {}
         ai_slots_resolved = {
@@ -1910,13 +1974,14 @@ def match_play_view(request, match_id):
     else:
         ai_slots_resolved = {"gk": "", "def": [], "mid": [], "off": []}
 
-    # montar lineups simples para o template (pos + player dict com name/photo_path)
+    # montar lineups (com pos tokens) - lista para template
     user_lineup = []
     if user_slots_resolved.get("gk"):
-        user_lineup.append({"pos":"GOL","player": user_slots_resolved["gk"]})
+        user_lineup.append({"pos": "GOL", "player": user_slots_resolved["gk"]})
     for idx, p in enumerate(user_slots_resolved.get("def") or []):
         if p:
-            user_lineup.append({"pos": f"DEF{idx+1}", "player": p})
+            p_snap = p
+            user_lineup.append({"pos": f"DEF{idx+1}", "player": p_snap})
     for idx, p in enumerate(user_slots_resolved.get("mid") or []):
         if p:
             user_lineup.append({"pos": f"MID{idx+1}", "player": p})
@@ -1926,7 +1991,7 @@ def match_play_view(request, match_id):
 
     ai_lineup = []
     if ai_slots_resolved.get("gk"):
-        ai_lineup.append({"pos":"GOL","player": ai_slots_resolved["gk"]})
+        ai_lineup.append({"pos": "GOL", "player": ai_slots_resolved["gk"]})
     for idx, p in enumerate(ai_slots_resolved.get("def") or []):
         if p:
             ai_lineup.append({"pos": f"DEF{idx+1}", "player": p})
@@ -1937,12 +2002,85 @@ def match_play_view(request, match_id):
         if p:
             ai_lineup.append({"pos": f"ATA{idx+1}", "player": p})
 
-    # inserir evento inicial (minute=0) com escalações (narrador)
-    def lineup_text_builder(user_lineup, ai_lineup):
+    # garantir que cada snapshot tem id e pos_x/pos_y (se não tiver, delegamos a formation simple)
+    def ensure_positions_on_lineup(lineup_list, is_home):
+        for entry in lineup_list:
+            snap = entry.get("player") or {}
+            if not isinstance(snap, dict):
+                continue
+            if not snap.get("id"):
+                snap["id"] = str(snap.get("object_id") or uuid.uuid4().hex)
+            # se backend já gerou pos_x/pos_y (ex: quando simulamos), mantemos; senão calculamos (same tokens used no JS)
+            if snap.get("pos_x") is None or snap.get("pos_y") is None:
+                # uso a mesma lógica breve do front (coordenadas normalizadas)
+                token = entry.get("pos") or snap.get("pos_token") or snap.get("position") or ""
+                
+
+                # [NAO SEI, FRENTE,]
+                def _formation_pos(token_inner, is_home_inner):
+                    token_up = (token_inner or "").upper()
+                    flip = (lambda x: x) if is_home_inner else (lambda x: 1.0 - x)
+                    if token_up.startswith("GOL"):
+                        return flip(0.06), 0.5
+                    if token_up.startswith("DEF"):
+                        n = int(''.join(ch for ch in token_up if ch.isdigit()) or "1")
+                        ys = [0.18, 0.37, 0.63, 0.82]; x = 0.22; idx = max(0, min(3, n-1)); return flip(x), ys[idx]
+                    if token_up.startswith("MID"):
+                        n = int(''.join(ch for ch in token_up if ch.isdigit()) or "1")
+                        xs = [0.44, 0.47, 0.44]; ys = [0.42, 0.5, 0.58]; idx = max(0, min(2, n-1)); return flip(xs[idx]), ys[idx]
+                    if token_up.startswith("ATA") or token_up.startswith("FWD") or token_up.startswith("ST"):
+                        n = int(''.join(ch for ch in token_up if ch.isdigit()) or "1")
+                        xs = [0.68, 0.72, 0.68]; ys = [0.3, 0.5, 0.7]; idx = max(0, min(2, n-1)); return flip(xs[idx]), ys[idx]
+                    return flip(0.5), 0.5
+                xnorm, ynorm = _formation_pos(token, is_home)
+                snap["pos_x"] = float(xnorm)
+                snap["pos_y"] = float(ynorm)
+
+    ensure_positions_on_lineup(user_lineup, is_home=True if home_is_user else False)
+    ensure_positions_on_lineup(ai_lineup, is_home=False if home_is_user else True)
+
+    # agora: credit coins conforme resultado (vitória +100, empate +50)
+    if home_is_user:
+        user_goal = score_home
+        opp_goal = score_away
+    else:
+        user_goal = score_away
+        opp_goal = score_home
+
+    coins_awarded = 0
+    try:
+        with transaction.atomic():
+            user_locked = SistemasUser.objects.select_for_update().get(pk=user.pk)
+            if user_goal > opp_goal:
+                user_locked.coins = (user_locked.coins or 0) + 100
+                user_locked.save(update_fields=["coins"])
+                coins_awarded = 100
+            elif user_goal == opp_goal:
+                user_locked.coins = (user_locked.coins or 0) + 50
+                user_locked.save(update_fields=["coins"])
+                coins_awarded = 50
+            else:
+                coins_awarded = 0
+
+            # deletar ai_team e match (dentro da transação)
+            try:
+                if ai_team:
+                    ai_team.delete()
+            except Exception:
+                logger.exception("Erro ao deletar ai_team (ignorado)")
+            try:
+                match.delete()
+            except Exception:
+                logger.exception("Erro ao deletar match (ignorado)")
+    except Exception:
+        logger.exception("Erro durante transação de final de partida (award + delete)")
+
+    # inserir evento inicial com escalações (minute = 0)
+    def lineup_text_builder(user_lineup_local, ai_lineup_local):
         seg = []
         seg.append("Escalações:")
-        seg.append("Seu Time -> " + ", ".join([f"{it['pos']}:{it['player'].get('name') or ''}" for it in user_lineup]) if user_lineup else "Seu Time sem jogadores")
-        seg.append("Adversário -> " + ", ".join([f"{it['pos']}:{it['player'].get('name') or ''}" for it in ai_lineup]) if ai_lineup else "Adversário sem jogadores")
+        seg.append("Seu Time -> " + ", ".join([f"{it['pos']}:{it['player'].get('name') or ''}" for it in user_lineup_local]) if user_lineup_local else "Seu Time sem jogadores")
+        seg.append("Adversário -> " + ", ".join([f"{it['pos']}:{it['player'].get('name') or ''}" for it in ai_lineup_local]) if ai_lineup_local else "Adversário sem jogadores")
         return " | ".join(seg)
 
     lineup_event = {
@@ -1952,51 +2090,21 @@ def match_play_view(request, match_id):
         "possession_home": None,
         "event_type": "lineup",
         "score_home": 0,
-        "score_away": 0
+        "score_away": 0,
+        "animations": []
     }
 
-    # inserir no começo da lista de events (se já tiverem)
     events_with_lineup = [lineup_event] + (events or [])
 
-    # determinar se o usuário venceu (considerando home_is_user)
-    if home_is_user:
-        user_goal = score_home
-        opp_goal = score_away
-    else:
-        user_goal = score_away
-        opp_goal = score_home
-    user_won = user_goal > opp_goal
-
-    coins_awarded = 0
-    # transação: creditar moedas e deletar registros
-    try:
-        with transaction.atomic():
-            # recarregar user para update
-            user_locked = SistemasUser.objects.select_for_update().get(pk=user.pk)
-            if user_won:
-                user_locked.coins = (user_locked.coins or 0) + 100
-                user_locked.save(update_fields=["coins"])
-                coins_awarded = 100
-
-            # deletar ai_team e match
-            try:
-                if ai_team:
-                    ai_team.delete()
-            except Exception:
-                logger.exception("Erro ao deletar ai_team (ignorado)")
-
-            try:
-                match.delete()
-            except Exception:
-                logger.exception("Erro ao deletar match (ignorado)")
-    except Exception:
-        logger.exception("Erro durante transação de final de partida (award + delete)")
-
-    events_json = json.dumps(events_with_lineup)
+    events_json = json.dumps(events_with_lineup, ensure_ascii=False)
+    user_lineup_json = json.dumps(user_lineup, ensure_ascii=False)
+    ai_lineup_json = json.dumps(ai_lineup, ensure_ascii=False)
 
     return render(request, "accounts/match_play.html", {
         "user": user,
         "events_json": events_json,
+        "user_lineup_json": user_lineup_json,
+        "ai_lineup_json": ai_lineup_json,
         "user_lineup": user_lineup,
         "ai_lineup": ai_lineup,
         "home_is_user": home_is_user,

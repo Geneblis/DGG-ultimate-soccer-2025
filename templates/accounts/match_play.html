@@ -1,382 +1,468 @@
-<!-- templates/accounts/match_play.html -->
 {% load static %}
-<!doctype html>
+<!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Partida - — DGG's Ultimate Brasileirão Team Menager</title>
+  <meta charset="utf-8" />
+  <title>Partida — DGG's Ultimate Brasileirão Team Manager</title>
   <link rel="stylesheet" href="{% static 'css/style.css' %}" />
   <style>
-   /* CSS Dinâmico Inspirado em EA FC - Tema Escuro com Toques Coloridos e Gradientes */
-
-/* Variáveis CSS para dinamismo e facilidade de personalização */
-:root {
-  --primary-bg-start: #0a0a0a; /* Preto profundo para início do gradiente */
-  --primary-bg-end: #001a33; /* Azul navy escuro para fim do gradiente */
-  --secondary-bg: #001133; /* Azul mais escuro para cartões e zonas */
-  --accent-color: #00aaff; /* Azul brilhante para botões e destaques */
-  --success-color: #00ff88; /* Verde vibrante para mensagens de sucesso */
-  --error-color: #ff4444; /* Vermelho para mensagens de erro */
-  --text-color: #e6eef6; /* Branco azulado para texto principal */
-  --muted-text: #a0a0a0; /* Cinza para texto secundário */
-  --border-color: #333; /* Bordas escuras */
-  --hover-bg: rgba(0, 170, 255, 0.1); /* Fundo sutil para hover */
-  --card-shadow: 0 4px 8px rgba(0, 0, 0, 0.5); /* Sombras para profundidade */
-  --console-bg: #111; /* Fundo escuro para console */
-  --console-text: #eee; /* Texto claro para console */
-}
-
-/* Fundo do corpo com gradiente dinâmico */
-body {
-  font-family: 'Arial', sans-serif; /* Ou uma fonte mais esportiva como 'Roboto Condensed' se disponível */
-  margin: 1.5rem;
-  background: linear-gradient(135deg, var(--primary-bg-start) 0%, var(--primary-bg-end) 100%);
-  color: var(--text-color);
-  min-height: 100vh; /* Garante que o gradiente cubra toda a tela */
-  background-attachment: fixed; /* Efeito parallax sutil */
-}
-
-/* Container principal */
-.container {
-  max-width: 900px; /* Mantido conforme o inline */
-  margin: 0 auto;
-  padding: 20px;
-  background: rgba(0, 0, 0, 0.1); /* Overlay sutil para destacar conteúdo */
-  border-radius: 12px;
-  box-shadow: var(--card-shadow);
-}
-
-/* Títulos */
-h2, h3, h4 {
-  color: var(--accent-color);
-  margin-bottom: 15px;
-}
-
-/* Placar */
-.score {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 15px;
-  background: var(--secondary-bg);
-  border-radius: 12px;
-  border: 1px solid var(--border-color);
-  box-shadow: var(--card-shadow);
-  margin-bottom: 20px;
-}
-
-.score div {
-  font-weight: 700;
-  color: var(--text-color);
-}
-
-#live-score {
-  font-size: 1.5em;
-  color: var(--accent-color);
-}
-
-/* Escalação */
-.lineups {
-  display: flex;
-  gap: 20px;
-  margin-top: 20px;
-  flex-wrap: wrap;
-}
-
-.team-box {
-  background: var(--secondary-bg);
-  padding: 15px;
-  border-radius: 12px;
-  border: 1px solid var(--border-color);
-  flex: 1;
-  min-width: 250px;
-  box-shadow: var(--card-shadow);
-  transition: transform 0.3s ease;
-}
-
-.team-box:hover {
-  transform: translateY(-3px);
-}
-
-.team-box h4 {
-  margin-top: 0;
-  text-align: center;
-}
-
-/* Itens dos jogadores */
-.player-item {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 10px;
-  padding: 8px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  transition: background 0.3s ease;
-}
-
-.player-item:hover {
-  background: var(--hover-bg);
-}
-
-.player-item img {
-  width: 80px; /* Aumentei ligeiramente para melhor visual */
-  height: 110px;
-  object-fit: cover;
-  border-radius: 8px;
-  background: var(--muted-text);
-  border: 2px solid var(--accent-color);
-}
-
-.player-item div {
-  flex: 1;
-}
-
-.player-item div:first-child {
-  font-weight: 700;
-  color: var(--text-color);
-}
-
-.player-item .muted {
-  color: var(--muted-text);
-  font-size: 0.8em;
-}
-
-/* Console de eventos */
-.console {
-  margin-top: 20px;
-  background: var(--console-bg);
-  color: var(--console-text);
-  padding: 15px;
-  min-height: 320px;
-  border-radius: 12px;
-  overflow: auto;
-  font-family: monospace;
-  box-shadow: var(--card-shadow);
-  border: 1px solid var(--border-color);
-}
-
-.event {
-  padding: 8px 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  transition: background 0.3s ease;
-}
-
-.event:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.minute {
-  color: var(--accent-color);
-  margin-right: 8px;
-  font-weight: bold;
-}
-
-/* Bloco final */
-.final {
-  margin-top: 20px;
-  padding: 20px;
-  background: var(--secondary-bg);
-  border-radius: 12px;
-  border: 1px solid var(--border-color);
-  box-shadow: var(--card-shadow);
-}
-
-.final h3 {
-  margin-top: 0;
-}
-
-#final-score {
-  font-size: 1.2em;
-  color: var(--accent-color);
-  font-weight: bold;
-}
-
-#winner-text {
-  font-weight: 700;
-  color: var(--text-color);
-}
-
-#reward-text {
-  margin-top: 10px;
-}
-
-.reward {
-  color: var(--success-color);
-  font-weight: 700;
-}
-
-/* Botões */
-.btn {
-  padding: 10px 16px;
-  border-radius: 8px;
-  background: var(--accent-color);
-  color: #fff;
-  text-decoration: none;
-  border: none;
-  cursor: pointer;
-  font-weight: bold;
-  transition: background 0.3s ease, transform 0.2s ease;
-}
-
-.btn:hover {
-  background: #0088cc; /* Azul mais escuro no hover */
-  transform: scale(1.05);
-}
-
-/* Parágrafos */
-p {
-  margin-bottom: 10px;
-}
-
-.muted {
-  color: var(--muted-text);
-}
-
-/* Responsividade básica */
-@media (max-width: 768px) {
-  .lineups {
-    flex-direction: column;
-  }
-  .team-box {
-    min-width: 100%;
-  }
-  .score {
-    flex-direction: column;
-    gap: 10px;
-  }
-}
+body { font-family: Arial, sans-serif; margin:12px; background:#061423; color:#e6eef6; }
+.wrap { max-width:1150px; margin:0 auto; display:flex; gap:18px; }
+.field-panel { flex:1; background:#0b3f2f; border-radius:12px; padding:10px; }
+.side-panel { width:360px; }
+svg#pitch { width:100%; height:600px; background:linear-gradient(#116644,#0e5b3d); border-radius:10px; display:block; }
+.player-circle { cursor:pointer; filter:drop-shadow(0 6px 8px rgba(0,0,0,0.6)); transition: transform 450ms linear; }
+.player-text { font-size:13px; fill:white; font-weight:700; pointer-events:none; }
+.console { margin-top:12px; background:#0d1b24; padding:10px; border-radius:8px; height:220px; overflow:auto; font-family:monospace; }
+.event { padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.02); }
+.minute { color:#00aaff; font-weight:700; margin-right:8px; }
+.scorebar { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.btn { padding:8px 12px; background:#00aaff; color:#002; border-radius:8px; border:none; cursor:pointer; }
+.team-list-item { display:flex; gap:10px; align-items:center; padding:6px; border-radius:6px; background: rgba(255,255,255,0.02); margin-bottom:6px; }
+.team-list-item img { width:46px; height:60px; object-fit:cover; border-radius:6px; border:2px solid rgba(255,255,255,0.04); }
+.team-list-item .meta { font-size:13px; }
+.small-muted { color:#99a; font-size:12px; }
+.final-block { display:none; margin-top:12px; padding:12px; background:#071828; border-radius:8px; border:1px solid #123; text-align:left; }
+#player-card { position:fixed; z-index:9999; display:none; min-width:220px; max-width:320px; background:#071828; border:1px solid #123; padding:8px; border-radius:8px; box-shadow:0 8px 18px rgba(0,0,0,0.6); color: #e6eef6; }
+#player-card img { width:78px; height:98px; object-fit:cover; border-radius:6px; float:left; margin-right:10px; border:2px solid rgba(255,255,255,0.04); }
+#player-card .pc-title { font-weight:700; margin-bottom:6px; }
+#player-card .pc-sub { font-size:12px; color:#99a; margin-bottom:6px; }
+#player-card .pc-attr { font-size:13px; margin-bottom:3px; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h2>Partida</h2>
+  <div class="wrap">
+    <div class="field-panel">
+      <div class="scorebar">
+        <div><strong>{% if home_is_user %}Seu Time{% else %}Adversário{% endif %}</strong></div>
+        <div id="live-score" style="font-size:20px">{{ score_home }} — {{ score_away }}</div>
+        <div><strong>{% if not home_is_user %}Seu Time{% else %}Adversário{% endif %}</strong></div>
+      </div>
 
-    <div class="score">
-      <div><strong>{% if home_is_user %}Seu Time{% else %}Adversário{% endif %}</strong></div>
-      <div id="live-score">{{ score_home }} — {{ score_away }}</div>
-      <div><strong>{% if not home_is_user %}Seu Time{% else %}Adversário{% endif %}</strong></div>
+      <svg id="pitch" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet">
+        <rect x="0" y="0" width="1000" height="600" rx="8" fill="#116644" />
+        <rect x="498" y="0" width="4" height="600" fill="#ffffff33" />
+        <g id="players-layer"></g>
+        <g id="ball-layer"></g>
+      </svg>
+
+      <div class="console" id="match-console" aria-live="polite"></div>
+
+      <div class="final-block" id="final-block">
+        <div id="final-score" style="font-weight:700; font-size:18px;"></div>
+        <div id="final-winner" class="small-muted" style="margin-top:6px;"></div>
+        <div id="final-reward" style="margin-top:6px; font-weight:700; color:#00ff88;"></div>
+        <div style="margin-top:8px"><button class="btn" onclick="history.back()">Voltar</button></div>
+      </div>
     </div>
 
-    <div class="lineups">
-      <div class="team-box">
+    <div class="side-panel">
+      <div style="background:#071828; padding:12px; border-radius:8px">
         <h4>Seu Time</h4>
-        {% if user_lineup %}
-          {% for it in user_lineup %}
-            <div class="player-item">
-              {% if it.player.photo_path %}
-                <img src="{% static it.player.photo_path %}" alt="{{ it.player.name }}">
+        <div id="user-team-box">
+          {% for p in user_lineup %}
+            <div class="team-list-item">
+              {% if p.player.photo_path %}
+                <img src="{% static p.player.photo_path %}" alt="{{ p.player.name }}">
               {% else %}
                 <img src="{% static 'images/default-player.png' %}" alt="sem foto">
               {% endif %}
-              <div>
-                <div style="font-weight:700">{{ it.player.name }}</div>
-                <div style="font-size:12px" class="muted">{{ it.pos }}</div>
+              <div class="meta">
+                <div style="font-weight:700">{{ p.player.name }}</div>
+                <div class="small-muted">{{ p.pos }}</div>
               </div>
             </div>
+          {% empty %}
+            <div class="small-muted">Sem jogadores</div>
           {% endfor %}
-        {% else %}
-          <p class="muted">Sem escalação.</p>
-        {% endif %}
-      </div>
+        </div>
 
-      <div class="team-box">
+        <hr style="border-color:#123" />
         <h4>Adversário</h4>
-        {% if ai_lineup %}
-          {% for it in ai_lineup %}
-            <div class="player-item">
-              {% if it.player.photo_path %}
-                <img src="{% static it.player.photo_path %}" alt="{{ it.player.name }}">
+        <div id="ai-team-box">
+          {% for p in ai_lineup %}
+            <div class="team-list-item">
+              {% if p.player.photo_path %}
+                <img src="{% static p.player.photo_path %}" alt="{{ p.player.name }}">
               {% else %}
                 <img src="{% static 'images/default-player.png' %}" alt="sem foto">
               {% endif %}
-              <div>
-                <div style="font-weight:700">{{ it.player.name }}</div>
-                <div style="font-size:12px" class="muted">{{ it.pos }}</div>
+              <div class="meta">
+                <div style="font-weight:700">{{ p.player.name }}</div>
+                <div class="small-muted">{{ p.pos }}</div>
               </div>
             </div>
+          {% empty %}
+            <div class="small-muted">Sem jogadores</div>
           {% endfor %}
-        {% else %}
-          <p class="muted">Sem escalação.</p>
-        {% endif %}
+        </div>
+
+        <div style="margin-top:12px">
+          <button class="btn" id="playpause">Pausar</button>
+          <button class="btn" id="skip">Pular para o final</button>
+        </div>
       </div>
-    </div>
-
-    <div class="console" id="match-console" aria-live="polite"></div>
-
-    <div class="final" id="final-block" style="display:none;">
-      <h3>Resultado final</h3>
-      <div id="final-score"></div>
-      <p id="winner-text"></p>
-      <p id="reward-text"></p>
-      <p><a class="btn" href="{% url 'matches' %}">Voltar aos modos</a></p>
     </div>
   </div>
 
-  <script>
-    const events = {{ events_json|safe }};
-    const consoleEl = document.getElementById("match-console");
-    const liveScoreEl = document.getElementById("live-score");
-    const finalBlock = document.getElementById("final-block");
-    const finalScoreEl = document.getElementById("final-score");
-    const winnerTextEl = document.getElementById("winner-text");
-    const rewardTextEl = document.getElementById("reward-text");
+  <div id="player-card" role="dialog" aria-hidden="true"></div>
 
-    let idx = 0;
-    let intervalMs = 2000;
-    let lastScoreHome = {{ score_home }};
-    let lastScoreAway = {{ score_away }};
+<script>
+const STATIC_BASE = "{% static '' %}";
+const events = {{ events_json|safe }} || [];
+const userLineup = {{ user_lineup|safe }} || [];
+const aiLineup = {{ ai_lineup|safe }} || [];
+const homeIsUser = {% if home_is_user %}true{% else %}false{% endif %};
+const coinsAwarded = {{ coins_awarded|default:0 }};
 
-    function renderEvent(ev) {
-      const div = document.createElement("div");
-      div.className = "event";
-      const minuteSpan = document.createElement("span");
-      minuteSpan.className = "minute";
-      minuteSpan.textContent = (ev.minute === 0 ? "[Escalação]" : "[" + ev.minute + "']") ;
-      const textNode = document.createElement("span");
-      textNode.textContent = " " + ev.text + " ";
-      div.appendChild(minuteSpan);
-      div.appendChild(textNode);
-      consoleEl.appendChild(div);
-      consoleEl.scrollTop = consoleEl.scrollHeight;
+const consoleEl = document.getElementById("match-console");
+const playersLayer = document.getElementById("players-layer");
+const ballLayer = document.getElementById("ball-layer");
+const scoreEl = document.getElementById("live-score");
+const finalBlock = document.getElementById("final-block");
+const finalScoreEl = document.getElementById("final-score");
+const finalWinnerEl = document.getElementById("final-winner");
+const finalRewardEl = document.getElementById("final-reward");
+const playerCard = document.getElementById("player-card");
 
-      if (typeof ev.score_home !== "undefined") {
-        lastScoreHome = ev.score_home;
-        lastScoreAway = ev.score_away;
-        liveScoreEl.textContent = lastScoreHome + " — " + lastScoreAway;
+const W = 1000, H = 600;
+
+function formationPosition(posToken, isHome) {
+  const t = (posToken || "").toString().toUpperCase();
+  const flipX = (x) => isHome ? x : (1 - x);
+  if (t.startsWith("GOL") || t.startsWith("GK")) return [ flipX(0.06), 0.5 ];
+  if (t.startsWith("DEF")) {
+    const num = parseInt((t.match(/\d+/)||[])[0] || "1", 10);
+    const ys = [0.18, 0.37, 0.63, 0.82];
+    const x = 0.22;
+    const idx = Math.max(0, Math.min(3, num-1));
+    return [ flipX(x), ys[idx] ];
+  }
+  if (t.startsWith("MID")) {
+    const num = parseInt((t.match(/\d+/)||[])[0] || "1", 10);
+    const xs = [0.44, 0.46, 0.44];
+    const ys = [0.42, 0.50, 0.58];
+    const idx = Math.max(0, Math.min(2, num-1));
+    const yNudge = isHome ? -0.02 : 0.02;
+    return [ flipX(xs[idx]), Math.max(0.08, Math.min(0.92, ys[idx] + yNudge)) ];
+  }
+  if (t.startsWith("ATA") || t.startsWith("FWD") || t.startsWith("ST") || t.startsWith("ATT")) {
+    const num = parseInt((t.match(/\d+/)||[])[0] || "1", 10);
+    const xs = [0.68, 0.72, 0.68];
+    const ys = [0.3, 0.5, 0.7];
+    const idx = Math.max(0, Math.min(2, num-1));
+    const yNudge = isHome ? -0.01 : 0.01;
+    return [ flipX(xs[idx]), Math.max(0.08, Math.min(0.92, ys[idx] + yNudge)) ];
+  }
+  const s = String(posToken || "").toLowerCase();
+  let h = 0; for (let i=0;i<s.length;i++){ h = ((h<<5)-h) + s.charCodeAt(i); h |= 0; }
+  const slotYs = [0.18,0.32,0.46,0.58,0.72,0.86];
+  return [ flipX(0.5), slotYs[Math.abs(h) % slotYs.length] ];
+}
+
+const idToSnapshot = {};
+function registerLineup(list, isHome) {
+  (list || []).forEach(it => {
+    const snap = it.player || it;
+    if (!snap) return;
+    const id = String(snap.id || snap.object_id || snap.name || ("unk_"+Math.random()));
+    if (!snap._norm_pos) {
+      if (snap.pos_x !== undefined && snap.pos_y !== undefined) {
+        snap._norm_pos = [ Number(snap.pos_x), Number(snap.pos_y) ];
+      } else {
+        const posToken = (it.pos || snap.pos || snap.position || "");
+        snap._norm_pos = formationPosition(posToken, isHome);
       }
     }
+    snap._team_is_home = isHome;
+    idToSnapshot[id] = snap;
+  });
+}
+registerLineup(userLineup, homeIsUser);
+registerLineup(aiLineup, !homeIsUser);
 
-    function finishMatch() {
-      finalBlock.style.display = "block";
-      finalScoreEl.textContent = lastScoreHome + " — " + lastScoreAway;
-      let winner = "Empate";
-      // determinar vencedor relativo ao usuário (será avaliado no servidor também)
-      if (lastScoreHome > lastScoreAway) {
-        winner = "{% if home_is_user %}Você venceu!{% else %}Adversário venceu.{% endif %}";
-      } else if (lastScoreAway > lastScoreHome) {
-        winner = "{% if not home_is_user %}Você venceu!{% else %}Adversário venceu.{% endif %}";
-      }
-      winnerTextEl.textContent = winner;
-      {% if coins_awarded and coins_awarded > 0 %}
-        rewardTextEl.innerHTML = "<span class='reward'>Você recebeu +{{ coins_awarded }} moedas!</span>";
-      {% endif %}
-    }
+const playerNodes = {};
+function normToPx(norm) { return [ Math.round(norm[0]*W), Math.round(norm[1]*H) ]; }
 
-    if (!events || events.length === 0) {
-      consoleEl.innerHTML = "<div class='event'>Nenhum evento registrado nesta partida.</div>";
-      finishMatch();
-    } else {
-      const timer = setInterval(() => {
-        if (idx >= events.length) {
-          clearInterval(timer);
-          finishMatch();
-          return;
+function createPlayerNode(snapshot, id, teamColor) {
+  const norm = snapshot._norm_pos || [0.5,0.5];
+  const [cx,cy] = normToPx(norm);
+  const g = document.createElementNS("http://www.w3.org/2000/svg","g");
+  g.setAttribute("data-player", id);
+  g.style.transform = `translate(${cx}px, ${cy}px)`;
+  g.style.transition = "transform 450ms linear";
+
+  const circle = document.createElementNS("http://www.w3.org/2000/svg","circle");
+  circle.setAttribute("r", 26);
+  circle.setAttribute("fill", teamColor);
+  circle.setAttribute("stroke", "#00000088");
+  circle.setAttribute("stroke-width", 2);
+
+  const text = document.createElementNS("http://www.w3.org/2000/svg","text");
+  text.setAttribute("x",0);
+  text.setAttribute("y",8);
+  text.setAttribute("text-anchor","middle");
+  text.setAttribute("class","player-text");
+  const label = String(snapshot.number || snapshot.pos || snapshot.name || "").slice(0,3);
+  text.textContent = label;
+
+  g.appendChild(circle);
+  g.appendChild(text);
+  playersLayer.appendChild(g);
+
+  g.addEventListener("click", ev => {
+    ev.stopPropagation();
+    showPlayerCard(id, ev.clientX, ev.clientY);
+  });
+
+  playerNodes[id] = { g, circle, text, pos: norm.slice(), snapshot };
+}
+
+(function initNodes(){
+  const homeColor = "#1f6fff";
+  const awayColor = "#c53030";
+  Object.keys(idToSnapshot).forEach(id => {
+    const snap = idToSnapshot[id];
+    const color = snap._team_is_home ? homeColor : awayColor;
+    createPlayerNode(snap, id, color);
+  });
+})();
+
+let ballNode = null;
+function createBall(){
+  ballLayer.innerHTML = "";
+  const g = document.createElementNS("http://www.w3.org/2000/svg","g");
+  const circle = document.createElementNS("http://www.w3.org/2000/svg","circle");
+  circle.setAttribute("r", 8);
+  circle.setAttribute("fill", "#fff");
+  circle.setAttribute("opacity", 0.95);
+  g.appendChild(circle);
+  ballLayer.appendChild(g);
+  ballNode = g;
+  ballNode.style.transition = "transform 300ms linear";
+}
+createBall();
+
+function moveNodeToNorm(nodeObjOrId, normPos, ms) {
+  if (!nodeObjOrId) return;
+  const node = (typeof nodeObjOrId === "string") ? playerNodes[nodeObjOrId] : nodeObjOrId;
+  if (!node || !node.g) return;
+  const [px,py] = normToPx(normPos);
+  node.pos = normPos.slice();
+  node.g.style.transition = `transform ${Math.max(120, ms)}ms linear`;
+  node.g.style.transform = `translate(${px}px, ${py}px)`;
+}
+function moveBallTo(normPos, ms) {
+  if (!ballNode) createBall();
+  const [px,py] = normToPx(normPos);
+  ballNode.style.transition = `transform ${Math.max(80, ms)}ms linear`;
+  ballNode.style.transform = `translate(${px}px, ${py}px)`;
+}
+
+function prettyEventText(text) {
+  if (!text) return "";
+  let out = String(text);
+  Object.keys(idToSnapshot).forEach(id => {
+    const name = idToSnapshot[id].name || idToSnapshot[id].player_name || id;
+    out = out.split(id).join(name);
+  });
+  return out;
+}
+
+function renderEvent(ev) {
+  const div = document.createElement("div");
+  div.className = "event";
+  const minuteSpan = document.createElement("span");
+  minuteSpan.className = "minute";
+  minuteSpan.textContent = (ev.minute===0 ? "[Escalação]" : "["+ev.minute+"']");
+  const textSpan = document.createElement("span");
+  textSpan.textContent = " " + prettyEventText(ev.text || "");
+  div.appendChild(minuteSpan);
+  div.appendChild(textSpan);
+  consoleEl.appendChild(div);
+  consoleEl.scrollTop = consoleEl.scrollHeight;
+}
+
+async function runEventAnimations(ev) {
+  if (!ev) return;
+  if (Array.isArray(ev.animations) && ev.animations.length) {
+    for (const a of ev.animations) {
+      if (a.type === "pass") {
+        const from = String(a.player_from_id), to = String(a.player_to_id);
+        const fromNode = playerNodes[from], toNode = playerNodes[to];
+        const fromPos = fromNode ? fromNode.pos : (idToSnapshot[from] ? idToSnapshot[from]._norm_pos : [0.5,0.5]);
+        const toPos = toNode ? toNode.pos : (idToSnapshot[to] ? idToSnapshot[to]._norm_pos : [0.5,0.5]);
+        moveBallTo(fromPos, 120); await new Promise(r=>setTimeout(r,120));
+        moveBallTo(toPos, a.duration_ms||260);
+        if (toNode) {
+          const nudged = [ toPos[0]*0.92 + fromPos[0]*0.08, toPos[1]*0.92 + fromPos[1]*0.08 ];
+          moveNodeToNorm(to, nudged, Math.max(160, a.duration_ms||260));
+          await new Promise(r=>setTimeout(r, a.duration_ms||260));
+          moveNodeToNorm(to, toPos, 180);
+        } else {
+          await new Promise(r=>setTimeout(r, a.duration_ms||260));
         }
-        const ev = events[idx++];
-        renderEvent(ev);
-      }, intervalMs);
+      } else if (a.type === "dribble" || a.type === "run") {
+        const id = String(a.player_from_id);
+        const toPos = a.to_pos || (idToSnapshot[id] ? idToSnapshot[id]._norm_pos : [0.5,0.5]);
+        moveNodeToNorm(id, toPos, a.duration_ms||280);
+        moveBallTo(toPos, a.duration_ms||280);
+        await new Promise(r=>setTimeout(r, a.duration_ms||300));
+      } else if (a.type === "shot") {
+        const shooter = String(a.player_from_id);
+        const shooterNode = playerNodes[shooter];
+        const shooterPos = shooterNode ? shooterNode.pos : (idToSnapshot[shooter] ? idToSnapshot[shooter]._norm_pos : [0.5,0.5]);
+        const targetPos = a.to_pos || (shooterPos[0] < 0.5 ? [0.98,0.5] : [0.02,0.5]);
+        moveNodeToNorm(shooter, [ shooterPos[0]*0.95 + targetPos[0]*0.05, shooterPos[1]*0.95 + targetPos[1]*0.05 ], a.duration_ms||220);
+        moveBallTo(targetPos, a.duration_ms||320);
+        await new Promise(r=>setTimeout(r, a.duration_ms||340));
+      } else if (a.type === "goal_effect") {
+        const pn = playerNodes[String(a.player_id)];
+        if (pn) {
+          pn.g.style.transition = `transform ${a.duration_ms/2}ms ease`;
+          pn.g.style.transformOrigin = "center center";
+          pn.g.style.transform = "scale(1.25)";
+          await new Promise(r=>setTimeout(r, Math.round(a.duration_ms/2)));
+          pn.g.style.transform = "scale(1)";
+          await new Promise(r=>setTimeout(r, Math.round(a.duration_ms/2)));
+        } else {
+          await new Promise(r=>setTimeout(r, a.duration_ms||300));
+        }
+      } else {
+        await new Promise(r=>setTimeout(r, a.duration_ms||200));
+      }
     }
-  </script>
+    return;
+  }
+
+  const passMatch = (ev.text||"").match(/Passe de ([0-9a-fA-F-]+) para ([0-9a-fA-F-]+)/i);
+  if (passMatch) {
+    const from = passMatch[1], to = passMatch[2];
+    const fromPos = (playerNodes[from] ? playerNodes[from].pos : (idToSnapshot[from] ? idToSnapshot[from]._norm_pos : [0.5,0.5]));
+    const toPos = (playerNodes[to] ? playerNodes[to].pos : (idToSnapshot[to] ? idToSnapshot[to]._norm_pos : [0.5,0.5]));
+    moveBallTo(fromPos, 120); await new Promise(r=>setTimeout(r,120));
+    moveBallTo(toPos, 260);
+    const toNode = playerNodes[to];
+    if (toNode) {
+      const nudged = [ toPos[0]*0.9 + fromPos[0]*0.1, toPos[1]*0.9 + fromPos[1]*0.1 ];
+      moveNodeToNorm(to, nudged, 200);
+      await new Promise(r=>setTimeout(r,260));
+      moveNodeToNorm(to, toPos, 220);
+    } else {
+      await new Promise(r=>setTimeout(r,260));
+    }
+  }
+}
+
+let idx = 0;
+let isPaused = false;
+const playpauseBtn = document.getElementById("playpause");
+playpauseBtn.addEventListener("click", () => {
+  isPaused = !isPaused;
+  playpauseBtn.textContent = isPaused ? "Rodar" : "Pausar";
+  if (!isPaused) scheduleNext();
+});
+document.getElementById("skip").addEventListener("click", () => {
+  while (idx < events.length) {
+    const ev = events[idx++];
+    renderEvent(ev);
+    if (typeof ev.score_home !== "undefined") scoreEl.textContent = ev.score_home + " — " + ev.score_away;
+  }
+  finishMatch();
+});
+
+async function scheduleNext() {
+  if (isPaused) return;
+  if (idx >= events.length) { finishMatch(); return; }
+  const ev = events[idx++];
+  renderEvent(ev);
+  if (typeof ev.score_home !== "undefined") scoreEl.textContent = ev.score_home + " — " + ev.score_away;
+  await runEventAnimations(ev);
+  setTimeout(()=>{ if (!isPaused) scheduleNext(); }, 300);
+}
+
+function finishMatch() {
+  const last = events.length ? events[events.length-1] : null;
+  const finalHome = last && typeof last.score_home !== "undefined" ? last.score_home : {{ score_home }};
+  const finalAway = last && typeof last.score_away !== "undefined" ? last.score_away : {{ score_away }};
+  finalScoreEl.textContent = finalHome + " — " + finalAway;
+  let winnerText = "Empate";
+  if (finalHome > finalAway) {
+    winnerText = (homeIsUser ? "Você venceu!" : "Adversário venceu.");
+  } else if (finalAway > finalHome) {
+    winnerText = (homeIsUser ? "Adversário venceu." : "Você venceu!");
+  }
+  finalWinnerEl.textContent = winnerText;
+  if (coinsAwarded && coinsAwarded > 0) finalRewardEl.textContent = `Você recebeu +${coinsAwarded} moedas!`;
+  finalBlock.style.display = "block";
+}
+
+(function initBallPositionFromEvents(){
+  if (!events || !events.length) { moveBallTo([0.5,0.5], 0); return; }
+  for (let i=0;i<events.length;i++){
+    const ev = events[i];
+    if (ev && Array.isArray(ev.animations) && ev.animations.length){
+      for (const a of ev.animations){
+        if ((a.type === "pass" || a.type === "shot") && a.from_pos) { moveBallTo(a.from_pos, 0); return; }
+      }
+    }
+    const passMatch = (ev.text||"").match(/Passe de ([0-9a-fA-F-]+) para ([0-9a-fA-F-]+)/i);
+    if (passMatch) {
+      const from = passMatch[1];
+      const snap = idToSnapshot[from];
+      if (snap && snap._norm_pos) { moveBallTo(snap._norm_pos, 0); return; }
+    }
+  }
+  moveBallTo([0.5,0.5], 0);
+})();
+
+function showPlayerCard(id, clientX, clientY) {
+  const snap = idToSnapshot[id];
+  if (!snap) return;
+  const img = snap.photo_path ? (STATIC_BASE + snap.photo_path) : (STATIC_BASE + "images/default-player.png");
+  const name = snap.name || "Jogador";
+  const pos = snap.position || snap.pos || "";
+  const overall = snap.overall || "N/A";
+  const attack = snap.attack || snap.attack_rating || "N/A";
+  const passing = snap.passing || snap.passing_rating || "N/A";
+  const defense = snap.defense || snap.defense_rating || "N/A";
+  const speed = snap.speed || "N/A";
+  const handling = snap.handling || snap.reflex || null;
+
+  let html = `<img src="${img}" alt="${name}">`;
+  html += `<div class="pc-title">${name}</div>`;
+  html += `<div class="pc-sub">${pos}</div>`;
+  html += `<div style="clear:both"></div>`;
+  html += `<div class="pc-attr">Overall: ${overall}</div>`;
+  html += `<div class="pc-attr">Ataque: ${attack} • Passe: ${passing}</div>`;
+  html += `<div class="pc-attr">Defesa: ${defense} • Velocidade: ${speed}</div>`;
+  if (handling) html += `<div class="pc-attr">Goleiro: ${handling}</div>`;
+  html += `<div style="margin-top:6px; font-size:12px; color:#99a">Clique fora para fechar</div>`;
+
+  playerCard.innerHTML = html;
+  playerCard.style.display = "block";
+  playerCard.setAttribute("aria-hidden", "false");
+
+  const pad = 12;
+  let left = clientX + pad;
+  let top = clientY + pad;
+  const rect = playerCard.getBoundingClientRect();
+  if (left + rect.width > window.innerWidth - 8) left = clientX - rect.width - pad;
+  if (top + rect.height > window.innerHeight - 8) top = clientY - rect.height - pad;
+  playerCard.style.left = `${Math.max(8, left)}px`;
+  playerCard.style.top = `${Math.max(8, top)}px`;
+}
+
+document.addEventListener("click", (ev) => {
+  if (playerCard.style.display === "block") {
+    playerCard.style.display = "none";
+    playerCard.setAttribute("aria-hidden", "true");
+  }
+});
+document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { playerCard.style.display = "none"; playerCard.setAttribute("aria-hidden","true"); } });
+
+if (events && events.length) { setTimeout(() => { scheduleNext(); }, 200); }
+else { consoleEl.innerHTML = "<div class='event'>Nenhum evento registrado nesta partida.</div>"; finishMatch(); }
+</script>
 </body>
 </html>
